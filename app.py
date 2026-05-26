@@ -2,6 +2,7 @@ import streamlit as st
 
 from sovereign.db import init_db
 from sovereign.estates import add_estate, list_estates
+from sovereign.homewatch import list_homewatch_properties
 from sovereign.vendor_audit import audit_website
 from sovereign.vendors import add_vendor, list_vendors, update_vendor_audit
 
@@ -29,7 +30,61 @@ module = st.sidebar.radio(
 
 if module == "Dashboard":
     st.header("Command Dashboard")
-    st.info("MVP shell ready.")
+
+    vendors_df = list_vendors()
+    estates_df = list_estates()
+    homewatch_df = list_homewatch_properties()
+
+    total_vendors = len(vendors_df)
+    total_estates = len(estates_df)
+    total_homewatch = len(homewatch_df)
+
+    audited_vendors = 0
+
+    if not vendors_df.empty and "website_audit_score" in vendors_df.columns:
+        audited_vendors = int((vendors_df["website_audit_score"] > 0).sum())
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Vendors", total_vendors)
+    col2.metric("Audited Vendors", audited_vendors)
+    col3.metric("Estates", total_estates)
+    col4.metric("HomeWatch Properties", total_homewatch)
+
+    st.divider()
+
+    st.subheader("Operational Alerts")
+
+    if vendors_df.empty:
+        st.info("No vendors yet.")
+    else:
+        low_score_vendors = vendors_df[
+            (vendors_df["website_audit_score"] > 0)
+            & (vendors_df["website_audit_score"] < 60)
+        ]
+
+        if low_score_vendors.empty:
+            st.success("No low-score audited vendors.")
+        else:
+            st.warning("Low-score vendors need review.")
+            st.dataframe(
+                low_score_vendors[
+                    ["company_name", "category", "website_audit_score"]
+                ],
+                use_container_width=True,
+            )
+
+    if not homewatch_df.empty:
+        not_ready = homewatch_df[homewatch_df["hurricane_ready"] == 0]
+
+        if not not_ready.empty:
+            st.error("Some HomeWatch properties are not hurricane ready.")
+            st.dataframe(
+                not_ready[["property_name", "city", "inspection_frequency"]],
+                use_container_width=True,
+            )
+        else:
+            st.success("All HomeWatch properties marked hurricane ready.")
 
 elif module == "Vendor Intelligence":
     st.header("Vendor Intelligence")
