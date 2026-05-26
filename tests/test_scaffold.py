@@ -16,6 +16,7 @@ class ScaffoldTest(unittest.TestCase):
         import sovereign.incidents
         import sovereign.inspections
         import sovereign.reports
+        import sovereign.risk
         import sovereign.security
         import sovereign.vendor_audit
         import sovereign.vendors

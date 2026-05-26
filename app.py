@@ -6,6 +6,7 @@ from sovereign.estates import add_estate, list_estates
 from sovereign.homewatch import add_homewatch_property, list_homewatch_properties
 from sovereign.incidents import add_incident, list_incidents
 from sovereign.inspections import add_homewatch_inspection, list_homewatch_inspections
+from sovereign.risk import calculate_homewatch_risk
 from sovereign.vendor_audit import audit_website
 from sovereign.vendors import add_vendor, list_vendors, update_vendor_audit
 
@@ -364,3 +365,6 @@ elif module == "Naples HomeWatch":
 
     st.subheader("Inspection History")
     st.dataframe(list_homewatch_inspections(), use_container_width=True)
+
+    st.subheader("HomeWatch Risk Score")
+    st.dataframe(calculate_homewatch_risk(), use_container_width=True)
