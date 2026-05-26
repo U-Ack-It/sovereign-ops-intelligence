@@ -7,7 +7,9 @@ DB_PATH = Path("data/sovereign.db")
 
 def get_connection():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 
 def init_db():
@@ -58,6 +60,20 @@ def init_db():
             inspection_frequency TEXT,
             hurricane_ready INTEGER DEFAULT 0,
             notes TEXT
+        )
+        """
+        )
+
+        cursor.execute(
+            """
+        CREATE TABLE IF NOT EXISTS estate_vendors (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            estate_id INTEGER NOT NULL,
+            vendor_id INTEGER NOT NULL,
+            role TEXT,
+            notes TEXT,
+            FOREIGN KEY (estate_id) REFERENCES estates(id),
+            FOREIGN KEY (vendor_id) REFERENCES vendors(id)
         )
         """
         )

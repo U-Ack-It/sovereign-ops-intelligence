@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class ScaffoldTest(unittest.TestCase):
     def test_sovereign_modules_import(self):
         import sovereign
+        import sovereign.assignments
         import sovereign.db
         import sovereign.estate
         import sovereign.estates

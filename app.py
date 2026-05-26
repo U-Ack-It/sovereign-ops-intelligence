@@ -1,6 +1,7 @@
 import streamlit as st
 
 from sovereign.db import init_db
+from sovereign.assignments import assign_vendor_to_estate, list_estate_vendor_assignments
 from sovereign.estates import add_estate, list_estates
 from sovereign.homewatch import list_homewatch_properties
 from sovereign.vendor_audit import audit_website
@@ -197,7 +198,46 @@ elif module == "Estate Command":
                 st.success("Estate saved.")
 
     st.subheader("Estate Database")
-    st.dataframe(list_estates(), use_container_width=True)
+    estates_df = list_estates()
+    vendors_df = list_vendors()
+    st.dataframe(estates_df, use_container_width=True)
+
+    st.subheader("Assign Vendor to Estate")
+
+    if estates_df.empty or vendors_df.empty:
+        st.info("Add at least one estate and one vendor first.")
+    else:
+        estate_options = {
+            f"{row['estate_name']} - {row['id']}": row
+            for _, row in estates_df.iterrows()
+        }
+        vendor_options = {
+            f"{row['company_name']} - {row['category']} - {row['id']}": row
+            for _, row in vendors_df.iterrows()
+        }
+
+        with st.form("assign_vendor_form"):
+            selected_estate_label = st.selectbox("Estate", list(estate_options.keys()))
+            selected_vendor_label = st.selectbox("Vendor", list(vendor_options.keys()))
+            role = st.text_input(
+                "Vendor role",
+                placeholder="Example: Primary HVAC emergency vendor",
+            )
+            assignment_notes = st.text_area("Assignment notes")
+
+            submitted_assignment = st.form_submit_button("Assign vendor")
+
+            if submitted_assignment:
+                assign_vendor_to_estate(
+                    int(estate_options[selected_estate_label]["id"]),
+                    int(vendor_options[selected_vendor_label]["id"]),
+                    role,
+                    assignment_notes,
+                )
+                st.success("Vendor assigned to estate.")
+
+    st.subheader("Estate Vendor Assignments")
+    st.dataframe(list_estate_vendor_assignments(), use_container_width=True)
 
 elif module == "Naples HomeWatch":
     st.header("Naples HomeWatch Command")
