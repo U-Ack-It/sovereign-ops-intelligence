@@ -66,6 +66,21 @@ def init_db():
 
         cursor.execute(
             """
+        CREATE TABLE IF NOT EXISTS homewatch_inspections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            property_name TEXT NOT NULL,
+            inspector TEXT,
+            inspection_date TEXT,
+            overall_status TEXT,
+            failed_items TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+        )
+
+        cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS incidents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             property_type TEXT NOT NULL,

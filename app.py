@@ -3,8 +3,9 @@ import streamlit as st
 from sovereign.db import init_db
 from sovereign.assignments import assign_vendor_to_estate, list_estate_vendor_assignments
 from sovereign.estates import add_estate, list_estates
-from sovereign.homewatch import list_homewatch_properties
+from sovereign.homewatch import add_homewatch_property, list_homewatch_properties
 from sovereign.incidents import add_incident, list_incidents
+from sovereign.inspections import add_homewatch_inspection, list_homewatch_inspections
 from sovereign.vendor_audit import audit_website
 from sovereign.vendors import add_vendor, list_vendors, update_vendor_audit
 
@@ -275,3 +276,91 @@ elif module == "Estate Command":
 elif module == "Naples HomeWatch":
     st.header("Naples HomeWatch Command")
     st.write("Manage seasonal-home inspections, owner reports, and open issues.")
+
+    with st.form("add_homewatch_property_form"):
+        property_name = st.text_input("Property name")
+        city = st.selectbox(
+            "City",
+            ["Naples", "Marco Island", "Bonita Springs", "Estero", "Other"],
+        )
+        owner_contact = st.text_input("Owner contact")
+        inspection_frequency = st.selectbox(
+            "Inspection frequency",
+            ["Weekly", "Biweekly", "Monthly", "Storm-only", "Other"],
+        )
+        hurricane_ready = st.checkbox("Hurricane ready")
+        notes = st.text_area("Property notes")
+
+        submitted_property = st.form_submit_button("Save property")
+
+        if submitted_property:
+            if not property_name:
+                st.error("Property name is required.")
+            else:
+                add_homewatch_property(
+                    property_name,
+                    city,
+                    owner_contact,
+                    inspection_frequency,
+                    hurricane_ready,
+                    notes,
+                )
+                st.success("HomeWatch property saved.")
+
+    st.subheader("HomeWatch Property Database")
+    homewatch_df = list_homewatch_properties()
+    st.dataframe(homewatch_df, use_container_width=True)
+
+    st.subheader("Inspection Checklist")
+
+    checklist_items = [
+        "Front entry secure",
+        "Windows secure",
+        "No visible leaks",
+        "No moisture smell",
+        "HVAC running",
+        "Thermostat normal",
+        "Electrical panel normal",
+        "Pool/spa normal",
+        "Landscape normal",
+        "No pest signs",
+        "Mail/package area clear",
+        "Storm shutters ready",
+    ]
+
+    with st.form("homewatch_inspection_form"):
+        if homewatch_df.empty:
+            inspection_property_name = st.text_input("Inspection property name")
+        else:
+            inspection_property_name = st.selectbox(
+                "Property",
+                homewatch_df["property_name"].tolist(),
+            )
+
+        inspector = st.text_input("Inspector")
+        inspection_date = st.date_input("Inspection date")
+        overall_status = st.selectbox(
+            "Overall status",
+            ["Clear", "Needs Attention", "Critical"],
+        )
+        failed_items = st.multiselect("Failed checklist items", checklist_items)
+        inspection_notes = st.text_area("Inspection notes")
+
+        submitted_inspection = st.form_submit_button("Save inspection")
+
+        if submitted_inspection:
+            if not inspection_property_name:
+                st.error("Property name is required.")
+            else:
+                add_homewatch_inspection(
+                    inspection_property_name,
+                    inspector,
+                    str(inspection_date),
+                    overall_status,
+                    failed_items,
+                    inspection_notes,
+                )
+                st.success("Inspection saved.")
+
+    st.subheader("Inspection History")
+    st.dataframe(list_homewatch_inspections(), use_container_width=True)
