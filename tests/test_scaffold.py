@@ -14,6 +14,7 @@ class ScaffoldTest(unittest.TestCase):
         import sovereign.reports
         import sovereign.security
         import sovereign.vendor_audit
+        import sovereign.vendors
 
         self.assertIsNotNone(sovereign)
 
