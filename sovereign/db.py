@@ -27,7 +27,9 @@ def init_db():
             emergency_available INTEGER DEFAULT 0,
             license_status TEXT,
             insurance_expiration TEXT,
-            notes TEXT
+            notes TEXT,
+            website_audit_score INTEGER DEFAULT 0,
+            last_audit_summary TEXT
         )
         """
         )
@@ -59,5 +61,15 @@ def init_db():
         )
         """
         )
+
+        # Safe migration for existing databases.
+        for column_sql in [
+            "ALTER TABLE vendors ADD COLUMN website_audit_score INTEGER DEFAULT 0",
+            "ALTER TABLE vendors ADD COLUMN last_audit_summary TEXT",
+        ]:
+            try:
+                cursor.execute(column_sql)
+            except sqlite3.OperationalError:
+                pass
 
         conn.commit()

@@ -43,3 +43,16 @@ def add_vendor(
 def list_vendors():
     with get_connection() as conn:
         return pd.read_sql_query("SELECT * FROM vendors ORDER BY id DESC", conn)
+
+
+def update_vendor_audit(vendor_id, score, summary):
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE vendors
+            SET website_audit_score = ?, last_audit_summary = ?
+            WHERE id = ?
+            """,
+            (score, summary, vendor_id),
+        )
+        conn.commit()
