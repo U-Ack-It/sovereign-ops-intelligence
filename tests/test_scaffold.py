@@ -10,6 +10,7 @@ class ScaffoldTest(unittest.TestCase):
         import sovereign
         import sovereign.db
         import sovereign.estate
+        import sovereign.estates
         import sovereign.homewatch
         import sovereign.reports
         import sovereign.security

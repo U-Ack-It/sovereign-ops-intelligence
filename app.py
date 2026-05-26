@@ -1,6 +1,7 @@
 import streamlit as st
 
 from sovereign.db import init_db
+from sovereign.estates import add_estate, list_estates
 from sovereign.vendor_audit import audit_website
 from sovereign.vendors import add_vendor, list_vendors, update_vendor_audit
 
@@ -102,7 +103,46 @@ elif module == "Vendor Intelligence":
 
 elif module == "Estate Command":
     st.header("Estate Command")
-    st.write("Manage estate operations, vendors, incidents, and readiness.")
+    st.write("Create and track luxury estate profiles.")
+
+    with st.form("add_estate_form"):
+        estate_name = st.text_input("Estate name")
+        city = st.selectbox(
+            "City",
+            ["Miami", "Naples", "Palm Beach", "Coral Gables", "Key Biscayne", "Other"],
+        )
+        property_type = st.selectbox(
+            "Property type",
+            [
+                "Single-family estate",
+                "Penthouse",
+                "Waterfront home",
+                "Seasonal home",
+                "Other",
+            ],
+        )
+        estate_manager = st.text_input("Estate manager")
+        emergency_contact = st.text_input("Emergency contact")
+        notes = st.text_area("Notes")
+
+        submitted = st.form_submit_button("Save estate")
+
+        if submitted:
+            if not estate_name:
+                st.error("Estate name is required.")
+            else:
+                add_estate(
+                    estate_name,
+                    city,
+                    property_type,
+                    estate_manager,
+                    emergency_contact,
+                    notes,
+                )
+                st.success("Estate saved.")
+
+    st.subheader("Estate Database")
+    st.dataframe(list_estates(), use_container_width=True)
 
 elif module == "Naples HomeWatch":
     st.header("Naples HomeWatch Command")
