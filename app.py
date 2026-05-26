@@ -4,6 +4,7 @@ from sovereign.db import init_db
 from sovereign.assignments import assign_vendor_to_estate, list_estate_vendor_assignments
 from sovereign.estates import add_estate, list_estates
 from sovereign.homewatch import list_homewatch_properties
+from sovereign.incidents import add_incident, list_incidents
 from sovereign.vendor_audit import audit_website
 from sovereign.vendors import add_vendor, list_vendors, update_vendor_audit
 
@@ -238,6 +239,38 @@ elif module == "Estate Command":
 
     st.subheader("Estate Vendor Assignments")
     st.dataframe(list_estate_vendor_assignments(), use_container_width=True)
+
+    st.subheader("Incident Log")
+
+    with st.form("estate_incident_form"):
+        property_name = st.text_input("Property / Estate name")
+        incident_type = st.selectbox(
+            "Incident type",
+            ["Leak", "HVAC", "Security", "Storm", "Vendor", "Other"],
+        )
+        severity = st.selectbox("Severity", ["Low", "Medium", "High", "Critical"])
+        status = st.selectbox("Status", ["Open", "In Progress", "Resolved"])
+        reported_by = st.text_input("Reported by")
+        notes = st.text_area("Incident notes")
+
+        submitted_incident = st.form_submit_button("Save incident")
+
+        if submitted_incident:
+            if not property_name:
+                st.error("Property name is required.")
+            else:
+                add_incident(
+                    "Estate",
+                    property_name,
+                    incident_type,
+                    severity,
+                    status,
+                    reported_by,
+                    notes,
+                )
+                st.success("Incident saved.")
+
+    st.dataframe(list_incidents(), use_container_width=True)
 
 elif module == "Naples HomeWatch":
     st.header("Naples HomeWatch Command")

@@ -66,6 +66,22 @@ def init_db():
 
         cursor.execute(
             """
+        CREATE TABLE IF NOT EXISTS incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            property_type TEXT NOT NULL,
+            property_name TEXT NOT NULL,
+            incident_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reported_by TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+        )
+
+        cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS estate_vendors (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             estate_id INTEGER NOT NULL,
