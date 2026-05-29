@@ -11,6 +11,10 @@ type TestResponse = {
   body: string;
 };
 
+type RequestOptions = {
+  requestId?: string | null;
+};
+
 function listenForTest(): Promise<number> {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
@@ -40,7 +44,21 @@ function requestJson(
   method: "GET" | "POST",
   path: string,
   body?: string,
+  options: RequestOptions = {},
 ): Promise<TestResponse> {
+  const requestId = options.requestId === undefined ? "test-request-id" : options.requestId;
+  const headers: Record<string, string | number> =
+    body === undefined
+      ? {}
+      : {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+        };
+
+  if (requestId !== null) {
+    headers["x-request-id"] = requestId;
+  }
+
   return new Promise((resolve, reject) => {
     const request = http.request(
       {
@@ -48,14 +66,7 @@ function requestJson(
         port,
         path,
         method,
-        headers:
-          body === undefined
-            ? { "x-request-id": "test-request-id" }
-            : {
-                "content-type": "application/json",
-                "content-length": Buffer.byteLength(body),
-                "x-request-id": "test-request-id",
-              },
+        headers,
       },
       (response) => {
         let responseBody = "";
@@ -90,7 +101,18 @@ function requestRaw(
   path: string,
   body: string,
   contentType: string,
+  options: RequestOptions = {},
 ): Promise<TestResponse> {
+  const requestId = options.requestId === undefined ? "test-request-id" : options.requestId;
+  const headers: Record<string, string | number> = {
+    "content-type": contentType,
+    "content-length": Buffer.byteLength(body),
+  };
+
+  if (requestId !== null) {
+    headers["x-request-id"] = requestId;
+  }
+
   return new Promise((resolve, reject) => {
     const request = http.request(
       {
@@ -98,11 +120,7 @@ function requestRaw(
         port,
         path,
         method,
-        headers: {
-          "content-type": contentType,
-          "content-length": Buffer.byteLength(body),
-          "x-request-id": "test-request-id",
-        },
+        headers,
       },
       (response) => {
         let responseBody = "";
@@ -153,9 +171,24 @@ function assertJsonResponse(response: TestResponse): void {
   assert.match(String(response.headers["content-type"]), /application\/json/);
 }
 
-function assertStructuredError(response: TestResponse, statusCode: number, code: string): void {
+function assertRequestIdHeader(response: TestResponse, expectedRequestId = "test-request-id"): void {
+  assert.equal(response.headers["x-request-id"], expectedRequestId);
+}
+
+function assertGeneratedRequestId(value: unknown, label: string): asserts value is string {
+  assertString(value, label);
+  assert.match(value, /^req_[a-z0-9]+_[a-z0-9]+$/);
+}
+
+function assertStructuredError(
+  response: TestResponse,
+  statusCode: number,
+  code: string,
+  expectedRequestId = "test-request-id",
+): void {
   assert.equal(response.statusCode, statusCode);
   assertJsonResponse(response);
+  assertRequestIdHeader(response, expectedRequestId);
 
   const body = JSON.parse(response.body) as Record<string, unknown>;
   assertJsonObject(body, "error response body");
@@ -164,7 +197,7 @@ function assertStructuredError(response: TestResponse, statusCode: number, code:
   assert.equal(body.error.code, code);
   assertString(body.error.message, "error.message");
   assertJsonObject(body.error.details, "error.details");
-  assert.equal(body.error.requestId, "test-request-id");
+  assert.equal(body.error.requestId, expectedRequestId);
 }
 
 function assertSkillShape(value: unknown): void {
@@ -346,6 +379,7 @@ test("health, ready, and version endpoints return 200", async () => {
 
     assert.equal(health.statusCode, 200);
     assertJsonResponse(health);
+    assertRequestIdHeader(health);
     const healthBody = JSON.parse(health.body) as Record<string, unknown>;
     assert.equal(healthBody.status, "ok");
     assert.equal(healthBody.service, "sovereign-ops-api");
@@ -354,6 +388,7 @@ test("health, ready, and version endpoints return 200", async () => {
 
     assert.equal(ready.statusCode, 200);
     assertJsonResponse(ready);
+    assertRequestIdHeader(ready);
     assert.deepEqual(JSON.parse(ready.body), {
       status: "ready",
       service: "sovereign-ops-api",
@@ -361,6 +396,7 @@ test("health, ready, and version endpoints return 200", async () => {
 
     assert.equal(version.statusCode, 200);
     assertJsonResponse(version);
+    assertRequestIdHeader(version);
     const versionBody = JSON.parse(version.body) as Record<string, unknown>;
     assert.equal(versionBody.name, "sovereign-ops-api");
     assert.equal(versionBody.version, "0.1.0");
@@ -416,7 +452,7 @@ test("valid advisor route returns existing fields, plan, and requestId", async (
 
     assertRouteSuccess(body, "Estate Advisor");
     assert.equal(body.requestId, "test-request-id");
-    assert.equal(response.headers["x-request-id"], "test-request-id");
+    assertRequestIdHeader(response);
   } finally {
     await closeServer();
   }
@@ -471,6 +507,7 @@ test("agents execute endpoint returns stable dry-run execution contract", async 
 
     assert.equal(response.statusCode, 200);
     assertJsonResponse(response);
+    assertRequestIdHeader(response);
 
     const body = JSON.parse(response.body) as Record<string, unknown>;
     assert.equal(body.requestId, "test-request-id");
@@ -501,6 +538,7 @@ test("skill execute endpoint returns stable execution response contract", async 
 
     assert.equal(response.statusCode, 200);
     assertJsonResponse(response);
+    assertRequestIdHeader(response);
     assertSkillExecutionShape(JSON.parse(response.body), "maintenance_triage");
   } finally {
     await closeServer();
@@ -516,6 +554,101 @@ test("unknown route and unsupported method return structured errors", async () =
 
     assertStructuredError(unknown, 404, "NOT_FOUND");
     assertStructuredError(unsupported, 405, "UNSUPPORTED_METHOD");
+  } finally {
+    await closeServer();
+  }
+});
+
+test("client-provided request ids are preserved on success and error responses", async () => {
+  const port = await listenForTest();
+  const requestId = "client-request-gate-6";
+
+  try {
+    const health = await requestJson(port, "GET", "/health", undefined, { requestId });
+    const ready = await requestJson(port, "GET", "/ready", undefined, { requestId });
+    const version = await requestJson(port, "GET", "/version", undefined, { requestId });
+    const route = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "Schedule maintenance for the property inspection." }),
+      { requestId },
+    );
+    const execute = await requestJson(
+      port,
+      "POST",
+      "/agents/execute",
+      JSON.stringify({
+        message: "The pool maintenance vendor missed the appointment again.",
+        context: { urgency: "medium" },
+      }),
+      { requestId },
+    );
+    const skillExecute = await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "maintenance_triage",
+        context: {
+          message: "Pool pump maintenance issue",
+          urgency: "medium",
+        },
+      }),
+      { requestId },
+    );
+    const invalidJson = await requestJson(port, "POST", "/agents/route", "{", { requestId });
+    const missingInput = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({}),
+      { requestId },
+    );
+    const unknownRoute = await requestJson(port, "GET", "/missing", undefined, { requestId });
+    const unsupportedMethod = await requestJson(port, "GET", "/agents/route", undefined, { requestId });
+
+    for (const response of [health, ready, version, route, execute, skillExecute]) {
+      assert.equal(response.statusCode, 200);
+      assertJsonResponse(response);
+      assertRequestIdHeader(response, requestId);
+    }
+
+    assert.equal((JSON.parse(route.body) as Record<string, unknown>).requestId, requestId);
+    assert.equal((JSON.parse(execute.body) as Record<string, unknown>).requestId, requestId);
+    assert.equal((JSON.parse(skillExecute.body) as Record<string, unknown>).requestId, requestId);
+
+    assertStructuredError(invalidJson, 400, "INVALID_JSON", requestId);
+    assertStructuredError(missingInput, 400, "INVALID_ROUTE_INPUT", requestId);
+    assertStructuredError(unknownRoute, 404, "NOT_FOUND", requestId);
+    assertStructuredError(unsupportedMethod, 405, "UNSUPPORTED_METHOD", requestId);
+  } finally {
+    await closeServer();
+  }
+});
+
+test("missing request id generates a non-empty request id on responses", async () => {
+  const port = await listenForTest();
+
+  try {
+    const health = await requestJson(port, "GET", "/health", undefined, { requestId: null });
+    const invalidJson = await requestJson(port, "POST", "/agents/route", "{", { requestId: null });
+
+    assert.equal(health.statusCode, 200);
+    assertJsonResponse(health);
+    assertGeneratedRequestId(health.headers["x-request-id"], "generated success x-request-id");
+
+    const healthBody = JSON.parse(health.body) as Record<string, unknown>;
+    assert.equal(healthBody.status, "ok");
+
+    assert.equal(invalidJson.statusCode, 400);
+    assertJsonResponse(invalidJson);
+    assertGeneratedRequestId(invalidJson.headers["x-request-id"], "generated error x-request-id");
+
+    const body = JSON.parse(invalidJson.body) as Record<string, unknown>;
+    assertJsonObject(body.error, "generated error");
+    assert.equal(body.error.code, "INVALID_JSON");
+    assert.equal(body.error.requestId, invalidJson.headers["x-request-id"]);
   } finally {
     await closeServer();
   }
