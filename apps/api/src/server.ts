@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
+import { AddressInfo } from "node:net";
 import { pathToFileURL } from "node:url";
 
 import { verifyAdminRequest } from "./admin-auth.js";
@@ -728,7 +729,46 @@ const isMainModule = process.argv[1]
   : false;
 
 if (isMainModule) {
+  let shutdownStarted = false;
+
+  function shutdown(signal: NodeJS.Signals): void {
+    if (shutdownStarted) {
+      return;
+    }
+
+    shutdownStarted = true;
+    console.log(`Received ${signal}. Shutting down API server.`);
+
+    const forceExitTimer = setTimeout(() => {
+      console.error("Forced shutdown after graceful shutdown timeout.");
+      process.exit(1);
+    }, 5_000);
+    forceExitTimer.unref();
+
+    server.close((error) => {
+      clearTimeout(forceExitTimer);
+
+      if (error) {
+        console.error("API server shutdown failed.");
+        console.error(error);
+        process.exit(1);
+      }
+
+      console.log("API server shutdown complete.");
+      process.exit(0);
+    });
+  }
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+
   server.listen(PORT, () => {
-    console.log(`API server listening on http://localhost:${PORT}`);
+    const address = server.address();
+    const boundPort =
+      typeof address === "object" && address !== null
+        ? (address as AddressInfo).port
+        : PORT;
+
+    console.log(`API server listening on http://localhost:${boundPort}`);
   });
 }

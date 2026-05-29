@@ -81,6 +81,10 @@ docker run --rm \
 
 Do not commit `.env` files. Use `.env.example` only as a template.
 
+The server handles `SIGTERM` and `SIGINT` by closing the HTTP server before exiting. The container image includes a Docker `HEALTHCHECK` against `GET /health`.
+
+`npm run smoke:production` builds the API, starts the production server on a temporary local port, verifies `GET /health`, sends `SIGTERM`, and confirms clean shutdown.
+
 ## Notes
 
 - Advisor execution is dry-run and does not call external systems.
