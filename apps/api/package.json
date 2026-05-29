@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "bug:sentinel": "node scripts/bug-sentinel.mjs",
+    "check:production": "node scripts/check-production-config.mjs",
     "gate:2": "npm run bug:sentinel",
     "guard": "node scripts/bug-guardian.mjs",
     "guardian": "node scripts/guardian.mjs",
@@ -19,6 +20,7 @@
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run test:agents && npm run smoke",
     "verify:guardian": "npm run verify && npm run guardian",
+    "verify:production": "npm run build && NODE_ENV=production npm run check:production && npm run sentinel",
     "verify:sentinel": "npm run verify && npm run sentinel"
   },
   "devDependencies": {
