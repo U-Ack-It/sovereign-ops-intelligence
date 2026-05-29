@@ -4,7 +4,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { clearApiAuditEvents, listApiAuditEvents } from "./agents/audit-trail.js";
-import { resetApiMetrics } from "./observability.js";
+import { recordTelemetryEvent, registerTelemetrySink, resetApiMetrics } from "./observability.js";
 import { parseRouteRequestBody, server } from "./server.js";
 
 type TestResponse = {
@@ -413,6 +413,10 @@ function assertMetricsShape(value: unknown): void {
 
   assertJsonObject(value.telemetry, "metrics.telemetry");
   assert.ok(Array.isArray(value.telemetry.recentEvents), "metrics.telemetry.recentEvents should be an array");
+  assertJsonObject(value.export, "metrics.export");
+  assert.equal(typeof value.export.otelEnabled, "boolean");
+  assertString(value.export.serviceName, "metrics.export.serviceName");
+  assert.equal(typeof value.export.endpointConfigured, "boolean");
 
   for (const event of value.telemetry.recentEvents) {
     assertJsonObject(event, "telemetry event");
@@ -1028,8 +1032,45 @@ test("dashboard endpoint returns advisor summary, audit stats, and does not reco
   }
 });
 
+test("observability sinks receive safe telemetry events and sink failures do not throw", () => {
+  resetApiMetrics();
+  const received: unknown[] = [];
+
+  registerTelemetrySink((event) => {
+    received.push(event);
+  });
+  registerTelemetrySink(() => {
+    throw new Error("sink failed");
+  });
+
+  recordTelemetryEvent({
+    eventType: "advisor.route",
+    requestId: "sink-request",
+    route: "/agents/route",
+    method: "POST",
+    advisor: "Estate Advisor",
+  });
+
+  assert.equal(received.length, 1);
+  assertJsonObject(received[0], "received telemetry event");
+  assert.equal(received[0].requestId, "sink-request");
+  assert.equal(received[0].eventType, "advisor.route");
+  assert.equal(received[0].advisor, "Estate Advisor");
+
+  const serialized = JSON.stringify(received);
+  assert.ok(!serialized.includes("Schedule maintenance"));
+  assert.ok(!serialized.includes("Pool pump maintenance issue"));
+  resetApiMetrics();
+});
+
 test("metrics endpoint returns process, HTTP, and audit metrics", async () => {
+  const originalEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  const originalHeaders = process.env.OTEL_EXPORTER_OTLP_HEADERS;
+  const originalServiceName = process.env.OTEL_SERVICE_NAME;
   clearApiAuditEvents();
+  process.env.OTEL_EXPORTER_OTLP_ENDPOINT = "https://collector.example.test/v1/traces";
+  process.env.OTEL_EXPORTER_OTLP_HEADERS = "authorization=redacted-test-token";
+  process.env.OTEL_SERVICE_NAME = "sovereign-ops-api-test";
   resetApiMetrics();
   const port = await listenForTest();
 
@@ -1116,6 +1157,10 @@ test("metrics endpoint returns process, HTTP, and audit metrics", async () => {
     assert.equal(metrics.audit.advisorExecuteCount, 1);
     assert.equal(metrics.audit.skillExecuteCount, 1);
     assert.equal(metrics.audit.apiErrorCount, 1);
+    assertJsonObject(metrics.export, "metrics.export");
+    assert.equal(metrics.export.otelEnabled, false);
+    assert.equal(metrics.export.serviceName, "sovereign-ops-api-test");
+    assert.equal(metrics.export.endpointConfigured, true);
 
     const httpRouteEvent = telemetryEvents.find((event) => {
       assertJsonObject(event, "telemetry event");
@@ -1146,6 +1191,44 @@ test("metrics endpoint returns process, HTTP, and audit metrics", async () => {
     const serializedTelemetry = JSON.stringify(telemetryEvents);
     assert.ok(!serializedTelemetry.includes("Schedule maintenance for the property inspection."));
     assert.ok(!serializedTelemetry.includes("Pool pump maintenance issue"));
+    const serializedMetrics = JSON.stringify(metrics);
+    assert.ok(!serializedMetrics.includes("collector.example.test"));
+    assert.ok(!serializedMetrics.includes("redacted-test-token"));
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+    resetApiMetrics();
+    restoreEnv("OTEL_EXPORTER_OTLP_ENDPOINT", originalEndpoint);
+    restoreEnv("OTEL_EXPORTER_OTLP_HEADERS", originalHeaders);
+    restoreEnv("OTEL_SERVICE_NAME", originalServiceName);
+  }
+});
+
+test("telemetry sink errors do not break request handling", async () => {
+  clearApiAuditEvents();
+  resetApiMetrics();
+  registerTelemetrySink(() => {
+    throw new Error("sink failed");
+  });
+  const port = await listenForTest();
+
+  try {
+    const response = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "Schedule maintenance for the property inspection." }),
+      { requestId: "sink-error-request" },
+    );
+
+    assert.equal(response.statusCode, 200);
+    assertJsonResponse(response);
+    assertRequestIdHeader(response, "sink-error-request");
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    assert.equal(body.advisor, "Estate Advisor");
+    assert.equal(body.requestId, "sink-error-request");
+    assert.ok(Array.isArray(body.skills));
+    assert.ok(body.skills.length > 0);
   } finally {
     await closeServer();
     clearApiAuditEvents();

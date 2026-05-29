@@ -19,6 +19,14 @@ export type ApiTelemetryEvent = {
   errorCode?: string;
 };
 
+export type ApiTelemetrySink = (event: ApiTelemetryEvent) => void;
+
+export type ApiTelemetryExportStatus = {
+  otelEnabled: boolean;
+  serviceName: string;
+  endpointConfigured: boolean;
+};
+
 export type ApiMetricsSnapshot = {
   generatedAt: string;
   process: {
@@ -47,6 +55,7 @@ export type ApiMetricsSnapshot = {
   telemetry: {
     recentEvents: ApiTelemetryEvent[];
   };
+  export: ApiTelemetryExportStatus;
 };
 
 type HttpRequestMetricInput = {
@@ -69,6 +78,7 @@ type TelemetryEventInput = {
 };
 
 const MAX_RETAINED_TELEMETRY_EVENTS = 100;
+const DEFAULT_SERVICE_NAME = "sovereign-ops-api";
 
 const httpMetrics = {
   totalRequests: 0,
@@ -79,6 +89,12 @@ const httpMetrics = {
   methodCounts: {} as Record<string, number>,
 };
 const telemetryEvents: ApiTelemetryEvent[] = [];
+const telemetrySinks = new Set<ApiTelemetrySink>();
+let telemetryExportStatus: ApiTelemetryExportStatus = {
+  otelEnabled: false,
+  serviceName: process.env.OTEL_SERVICE_NAME?.trim() || DEFAULT_SERVICE_NAME,
+  endpointConfigured: Boolean(process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim()),
+};
 
 function incrementCounter(counter: Record<string, number>, key: string): void {
   counter[key] = (counter[key] ?? 0) + 1;
@@ -109,6 +125,14 @@ export function recordTelemetryEvent(input: TelemetryEventInput): void {
 
   if (telemetryEvents.length > MAX_RETAINED_TELEMETRY_EVENTS) {
     telemetryEvents.length = MAX_RETAINED_TELEMETRY_EVENTS;
+  }
+
+  for (const sink of telemetrySinks) {
+    try {
+      sink({ ...event });
+    } catch {
+      // Telemetry sinks must never block or crash the API response path.
+    }
   }
 }
 
@@ -168,7 +192,28 @@ export function getApiMetricsSnapshot(): ApiMetricsSnapshot {
     telemetry: {
       recentEvents: telemetryEvents.slice(0, 25),
     },
+    export: { ...telemetryExportStatus },
   };
+}
+
+export function registerTelemetrySink(sink: ApiTelemetrySink): () => void {
+  telemetrySinks.add(sink);
+
+  return () => {
+    telemetrySinks.delete(sink);
+  };
+}
+
+export function setTelemetryExportStatus(status: ApiTelemetryExportStatus): void {
+  telemetryExportStatus = {
+    otelEnabled: status.otelEnabled,
+    serviceName: status.serviceName,
+    endpointConfigured: status.endpointConfigured,
+  };
+}
+
+export function getTelemetryExportStatus(): ApiTelemetryExportStatus {
+  return { ...telemetryExportStatus };
 }
 
 export function resetApiMetrics(): void {
@@ -179,4 +224,10 @@ export function resetApiMetrics(): void {
   httpMetrics.routeCounts = {};
   httpMetrics.methodCounts = {};
   telemetryEvents.length = 0;
+  telemetrySinks.clear();
+  telemetryExportStatus = {
+    otelEnabled: false,
+    serviceName: process.env.OTEL_SERVICE_NAME?.trim() || DEFAULT_SERVICE_NAME,
+    endpointConfigured: Boolean(process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim()),
+  };
 }

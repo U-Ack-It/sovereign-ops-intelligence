@@ -10,6 +10,7 @@ import { executeFirstSkillForRoute } from "./agents/executor.js";
 import { orchestrateAgentRequest } from "./agents/orchestrator.js";
 import { SkillExecutionContext, executeSkill } from "./agents/skill-executor.js";
 import { getApiMetricsSnapshot, recordHttpRequestMetric, recordTelemetryEvent } from "./observability.js";
+import { initializeOtelExportIfEnabled, shutdownOtelExport } from "./otel-exporter.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MAX_BODY_BYTES = 1_000_000;
@@ -824,13 +825,28 @@ if (isMainModule) {
         process.exit(1);
       }
 
-      console.log("API server shutdown complete.");
-      process.exit(0);
+      shutdownOtelExport()
+        .then(() => {
+          console.log("API server shutdown complete.");
+          process.exit(0);
+        })
+        .catch((shutdownError: unknown) => {
+          console.error("OpenTelemetry shutdown failed.");
+          console.error(shutdownError);
+          process.exit(1);
+        });
     });
   }
 
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
+
+  try {
+    initializeOtelExportIfEnabled();
+  } catch (error) {
+    console.warn("OpenTelemetry trace export initialization failed. Continuing without external export.");
+    console.warn(error instanceof Error ? error.message : "Unknown OpenTelemetry initialization error.");
+  }
 
   server.listen(PORT, () => {
     const address = server.address();

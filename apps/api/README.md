@@ -44,6 +44,10 @@ npm start
 - `PORT` - HTTP port for `npm start`. Defaults to `3000`.
 - `NODE_ENV` - set to `production` for production runtime behavior.
 - `SOVEREIGN_ADMIN_API_KEY` - admin key for internal visibility routes.
+- `SOVEREIGN_OTEL_ENABLED` - set to `true` to enable optional OTLP trace export.
+- `OTEL_SERVICE_NAME` - service name for external telemetry. Defaults to `sovereign-ops-api`.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` - OTLP HTTP trace endpoint.
+- `OTEL_EXPORTER_OTLP_HEADERS` - OTLP HTTP headers, usually for backend authentication.
 
 When `SOVEREIGN_ADMIN_API_KEY` is configured, requests to `GET /agents/audit`, `GET /agents/dashboard`, and `GET /agents/metrics` must include:
 
@@ -91,6 +95,27 @@ The server handles `SIGTERM` and `SIGINT` by closing the HTTP server before exit
 Current mode: in-memory metrics. `GET /agents/metrics` exposes process, HTTP, audit, and telemetry event summaries for local debugging and operational checks. It is admin-protected and does not expose secrets, request bodies, or full user input.
 
 Next integration target: OpenTelemetry Collector. The API now records stable telemetry event concepts such as `http.request`, `advisor.route`, `advisor.execute`, `skill.execute`, and `api.error` with correlation fields like `requestId`, route, method, status code, advisor, and duration where available. A future exporter can send these events to an OpenTelemetry Collector, which can receive, process, and export telemetry to a backend without rewriting the HTTP server.
+
+## External Trace Export
+
+External trace export is optional and disabled by default. Enable generic OTLP export with environment variables:
+
+```sh
+SOVEREIGN_OTEL_ENABLED=true
+OTEL_SERVICE_NAME=sovereign-ops-api
+OTEL_EXPORTER_OTLP_ENDPOINT=<otlp-http-traces-endpoint>
+OTEL_EXPORTER_OTLP_HEADERS=<otlp-auth-headers>
+```
+
+Do not commit endpoint credentials or OTLP headers. `GET /agents/metrics` only reports whether an endpoint is configured; it does not return endpoint values or headers.
+
+Recommended production path:
+
+```text
+Sovereign Ops API -> OpenTelemetry Collector -> telemetry backend
+```
+
+The OpenTelemetry Collector can receive, process, redact, sample, and export telemetry to a backend. Langfuse can be used as one OTLP-compatible backend when configured with its endpoint and authorization headers, but the API adapter remains generic and does not depend on Langfuse-specific code.
 
 ## Notes
 
