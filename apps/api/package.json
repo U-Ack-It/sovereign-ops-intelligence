@@ -1,0 +1,28 @@
+{
+  "name": "sovereign-ops-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "bug:sentinel": "node scripts/bug-sentinel.mjs",
+    "gate:2": "npm run bug:sentinel",
+    "guard": "node scripts/bug-guardian.mjs",
+    "guardian": "node scripts/guardian.mjs",
+    "smoke": "npm run build && node scripts/smoke-route.mjs",
+    "smoke:route": "npm run smoke",
+    "smoke:execute": "node scripts/smoke-execute.mjs",
+    "start": "node dist/server.js",
+    "sentinel": "npm run bug:sentinel",
+    "test": "npm run test:agents",
+    "test:agents": "rm -rf .tmp-test-build && tsc -p tsconfig.test.json && node --test \".tmp-test-build/**/*.test.js\" \"scripts/*.test.mjs\"",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run test:agents && npm run smoke",
+    "verify:guardian": "npm run verify && npm run guardian",
+    "verify:sentinel": "npm run verify && npm run sentinel"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.9.3"
+  }
+}

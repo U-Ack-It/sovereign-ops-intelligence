@@ -1,0 +1,8 @@
+.streamlit/secrets.toml
+node_modules/
+apps/api/dist/
+apps/api/.artifacts/
+apps/api/.tmp-test-build/
+apps/api/reports/bug-guardian/
+.guardian/
+artifacts/bug-sentinel/
