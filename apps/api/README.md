@@ -27,6 +27,7 @@ npm run sentinel
 ```sh
 npm run check:production
 npm run verify:production
+npm run smoke:production
 npm start
 ```
 
@@ -50,6 +51,35 @@ x-admin-api-key: <configured key>
 ```
 
 In production, `SOVEREIGN_ADMIN_API_KEY` must be configured and must not be an obvious placeholder. Run `npm run check:production` before deployment.
+
+## Deployment
+
+Build output is written to `dist` and excludes test files.
+
+```sh
+npm run build
+NODE_ENV=production SOVEREIGN_ADMIN_API_KEY=<long-random-secret> npm run check:production
+NODE_ENV=production SOVEREIGN_ADMIN_API_KEY=<long-random-secret> npm run verify:production
+NODE_ENV=production SOVEREIGN_ADMIN_API_KEY=<long-random-secret> npm start
+```
+
+Docker image build:
+
+```sh
+docker build -t sovereign-ops-api -f apps/api/Dockerfile apps/api
+```
+
+Docker runtime example:
+
+```sh
+docker run --rm \
+  -p 3000:3000 \
+  -e NODE_ENV=production \
+  -e SOVEREIGN_ADMIN_API_KEY=<long-random-secret> \
+  sovereign-ops-api
+```
+
+Do not commit `.env` files. Use `.env.example` only as a template.
 
 ## Notes
 

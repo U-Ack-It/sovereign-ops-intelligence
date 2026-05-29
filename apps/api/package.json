@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "bug:sentinel": "node scripts/bug-sentinel.mjs",
     "check:production": "node scripts/check-production-config.mjs",
     "gate:2": "npm run bug:sentinel",
     "guard": "node scripts/bug-guardian.mjs",
     "guardian": "node scripts/guardian.mjs",
     "smoke": "npm run build && node scripts/smoke-route.mjs",
+    "smoke:production": "node scripts/smoke-production-start.mjs",
     "smoke:route": "npm run smoke",
     "smoke:execute": "node scripts/smoke-execute.mjs",
     "start": "node dist/server.js",
@@ -20,7 +21,7 @@
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run test:agents && npm run smoke",
     "verify:guardian": "npm run verify && npm run guardian",
-    "verify:production": "npm run build && NODE_ENV=production npm run check:production && npm run sentinel",
+    "verify:production": "npm run build && NODE_ENV=production npm run check:production && NODE_ENV=test SOVEREIGN_ADMIN_API_KEY= npm run sentinel && npm run smoke:production",
     "verify:sentinel": "npm run verify && npm run sentinel"
   },
   "devDependencies": {
