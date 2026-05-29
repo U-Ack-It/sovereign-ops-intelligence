@@ -14,6 +14,7 @@ type TestResponse = {
 
 type RequestOptions = {
   requestId?: string | null;
+  adminApiKey?: string;
 };
 
 function listenForTest(): Promise<number> {
@@ -58,6 +59,10 @@ function requestJson(
 
   if (requestId !== null) {
     headers["x-request-id"] = requestId;
+  }
+
+  if (options.adminApiKey !== undefined) {
+    headers["x-admin-api-key"] = options.adminApiKey;
   }
 
   return new Promise((resolve, reject) => {
@@ -112,6 +117,10 @@ function requestRaw(
 
   if (requestId !== null) {
     headers["x-request-id"] = requestId;
+  }
+
+  if (options.adminApiKey !== undefined) {
+    headers["x-admin-api-key"] = options.adminApiKey;
   }
 
   return new Promise((resolve, reject) => {
@@ -369,6 +378,15 @@ function assertDashboardShape(value: unknown): void {
   for (const event of audit.recentEvents) {
     assertAuditEventShape(event);
   }
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+
+  process.env[name] = value;
 }
 
 function assertRouteSuccess(
@@ -943,5 +961,171 @@ test("dashboard endpoint returns advisor summary, audit stats, and does not reco
   } finally {
     await closeServer();
     clearApiAuditEvents();
+  }
+});
+
+test("admin visibility endpoints stay open in local mode when no admin key is configured", async () => {
+  const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
+  const originalNodeEnv = process.env.NODE_ENV;
+  clearApiAuditEvents();
+  delete process.env.SOVEREIGN_ADMIN_API_KEY;
+  process.env.NODE_ENV = "test";
+
+  const port = await listenForTest();
+
+  try {
+    const audit = await requestJson(port, "GET", "/agents/audit", undefined, {
+      requestId: "local-audit-request",
+    });
+    const dashboard = await requestJson(port, "GET", "/agents/dashboard", undefined, {
+      requestId: "local-dashboard-request",
+    });
+
+    assert.equal(audit.statusCode, 200);
+    assertJsonResponse(audit);
+    assertRequestIdHeader(audit, "local-audit-request");
+
+    assert.equal(dashboard.statusCode, 200);
+    assertJsonResponse(dashboard);
+    assertRequestIdHeader(dashboard, "local-dashboard-request");
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+    restoreEnv("SOVEREIGN_ADMIN_API_KEY", originalAdminKey);
+    restoreEnv("NODE_ENV", originalNodeEnv);
+  }
+});
+
+test("configured admin key protects audit and dashboard endpoints", async () => {
+  const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
+  const originalNodeEnv = process.env.NODE_ENV;
+  process.env.SOVEREIGN_ADMIN_API_KEY = "test-admin-key";
+  process.env.NODE_ENV = "test";
+  clearApiAuditEvents();
+
+  const port = await listenForTest();
+
+  try {
+    const auditMissing = await requestJson(port, "GET", "/agents/audit", undefined, {
+      requestId: "admin-audit-missing",
+    });
+    const dashboardMissing = await requestJson(port, "GET", "/agents/dashboard", undefined, {
+      requestId: "admin-dashboard-missing",
+    });
+    const auditWrong = await requestJson(port, "GET", "/agents/audit", undefined, {
+      requestId: "admin-audit-wrong",
+      adminApiKey: "wrong-admin-key",
+    });
+    const dashboardWrong = await requestJson(port, "GET", "/agents/dashboard", undefined, {
+      requestId: "admin-dashboard-wrong",
+      adminApiKey: "wrong-admin-key",
+    });
+    const auditCorrect = await requestJson(port, "GET", "/agents/audit", undefined, {
+      requestId: "admin-audit-correct",
+      adminApiKey: "test-admin-key",
+    });
+    const dashboardCorrect = await requestJson(port, "GET", "/agents/dashboard", undefined, {
+      requestId: "admin-dashboard-correct",
+      adminApiKey: "test-admin-key",
+    });
+
+    assertStructuredError(auditMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-audit-missing");
+    assertStructuredError(dashboardMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-dashboard-missing");
+    assertStructuredError(auditWrong, 403, "ADMIN_AUTH_INVALID", "admin-audit-wrong");
+    assertStructuredError(dashboardWrong, 403, "ADMIN_AUTH_INVALID", "admin-dashboard-wrong");
+
+    assert.equal(auditCorrect.statusCode, 200);
+    assertJsonResponse(auditCorrect);
+    assertRequestIdHeader(auditCorrect, "admin-audit-correct");
+
+    assert.equal(dashboardCorrect.statusCode, 200);
+    assertJsonResponse(dashboardCorrect);
+    assertRequestIdHeader(dashboardCorrect, "admin-dashboard-correct");
+    const dashboardBody = JSON.parse(dashboardCorrect.body) as Record<string, unknown>;
+    assertDashboardShape(dashboardBody.dashboard);
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+    restoreEnv("SOVEREIGN_ADMIN_API_KEY", originalAdminKey);
+    restoreEnv("NODE_ENV", originalNodeEnv);
+  }
+});
+
+test("production mode fails closed for admin visibility endpoints without configured key", async () => {
+  const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
+  const originalNodeEnv = process.env.NODE_ENV;
+  delete process.env.SOVEREIGN_ADMIN_API_KEY;
+  process.env.NODE_ENV = "production";
+  clearApiAuditEvents();
+
+  const port = await listenForTest();
+
+  try {
+    const audit = await requestJson(port, "GET", "/agents/audit", undefined, {
+      requestId: "prod-audit-request",
+    });
+    const dashboard = await requestJson(port, "GET", "/agents/dashboard", undefined, {
+      requestId: "prod-dashboard-request",
+    });
+
+    assertStructuredError(audit, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-audit-request");
+    assertStructuredError(dashboard, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-dashboard-request");
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+    restoreEnv("SOVEREIGN_ADMIN_API_KEY", originalAdminKey);
+    restoreEnv("NODE_ENV", originalNodeEnv);
+  }
+});
+
+test("public routes do not require the admin API key", async () => {
+  const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
+  const originalNodeEnv = process.env.NODE_ENV;
+  process.env.SOVEREIGN_ADMIN_API_KEY = "test-admin-key";
+  process.env.NODE_ENV = "test";
+
+  const port = await listenForTest();
+
+  try {
+    const health = await requestJson(port, "GET", "/health");
+    const ready = await requestJson(port, "GET", "/ready");
+    const version = await requestJson(port, "GET", "/version");
+    const route = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "Schedule maintenance for the property inspection." }),
+    );
+    const execute = await requestJson(
+      port,
+      "POST",
+      "/agents/execute",
+      JSON.stringify({
+        message: "The pool maintenance vendor missed the appointment again.",
+        context: { urgency: "medium" },
+      }),
+    );
+    const skillExecute = await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "maintenance_triage",
+        context: {
+          message: "Pool pump maintenance issue",
+          urgency: "medium",
+        },
+      }),
+    );
+
+    for (const response of [health, ready, version, route, execute, skillExecute]) {
+      assert.equal(response.statusCode, 200);
+      assertJsonResponse(response);
+      assertRequestIdHeader(response);
+    }
+  } finally {
+    await closeServer();
+    restoreEnv("SOVEREIGN_ADMIN_API_KEY", originalAdminKey);
+    restoreEnv("NODE_ENV", originalNodeEnv);
   }
 });

@@ -111,6 +111,17 @@ function postRaw(path, body, contentType) {
 }
 
 function getJson(path) {
+  const headers = {
+    "x-request-id": `smoke-${path.replaceAll("/", "-")}`,
+  };
+
+  if (
+    process.env.SOVEREIGN_ADMIN_API_KEY &&
+    (path.startsWith(AUDIT_PATH) || path.startsWith(DASHBOARD_PATH))
+  ) {
+    headers["x-admin-api-key"] = process.env.SOVEREIGN_ADMIN_API_KEY;
+  }
+
   return new Promise((resolve, reject) => {
     const request = http.request(
       {
@@ -118,9 +129,7 @@ function getJson(path) {
         port,
         path,
         method: "GET",
-        headers: {
-          "x-request-id": `smoke-${path.replaceAll("/", "-")}`,
-        },
+        headers,
       },
       (response) => {
         let responseBody = "";

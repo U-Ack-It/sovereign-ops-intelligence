@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 
+import { verifyAdminRequest } from "./admin-auth.js";
 import { ApiAuditEventType, ApiAuditStatus, listApiAuditEvents, recordApiAuditEvent } from "./agents/audit-trail.js";
 import { buildAdvisorDashboardSummary } from "./agents/dashboard.js";
 import { executeFirstSkillForRoute } from "./agents/executor.js";
@@ -577,6 +578,17 @@ export const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && requestPath === "/agents/audit") {
+      const adminAuth = verifyAdminRequest(request);
+
+      if (!adminAuth.ok) {
+        sendError(response, adminAuth.statusCode, adminAuth.error, requestId, {
+          method: request.method ?? "UNKNOWN",
+          route: requestPath,
+        });
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode);
+        return;
+      }
+
       sendJson(
         response,
         200,
@@ -590,6 +602,17 @@ export const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && requestPath === "/agents/dashboard") {
+      const adminAuth = verifyAdminRequest(request);
+
+      if (!adminAuth.ok) {
+        sendError(response, adminAuth.statusCode, adminAuth.error, requestId, {
+          method: request.method ?? "UNKNOWN",
+          route: requestPath,
+        });
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode);
+        return;
+      }
+
       sendJson(
         response,
         200,
