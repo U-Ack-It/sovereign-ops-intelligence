@@ -332,6 +332,45 @@ function assertAuditEventShape(value: unknown): void {
   }
 }
 
+function assertDashboardShape(value: unknown): void {
+  assertJsonObject(value, "dashboard");
+  assert.equal(value.status, "ok");
+  assertString(value.generatedAt, "dashboard.generatedAt");
+  assert.ok(Array.isArray(value.advisors), "dashboard.advisors should be an array");
+  assert.ok(value.advisors.length > 0, "dashboard.advisors should not be empty");
+  assertJsonObject(value.audit, "dashboard.audit");
+  const audit = value.audit;
+  assert.ok(Array.isArray(audit.recentEvents), "dashboard.audit.recentEvents should be an array");
+  assertJsonObject(audit.stats, "dashboard.audit.stats");
+
+  for (const advisor of value.advisors) {
+    assertJsonObject(advisor, "dashboard advisor");
+    assertString(advisor.id, "dashboard advisor.id");
+    assertString(advisor.name, "dashboard advisor.name");
+    assertString(advisor.description, "dashboard advisor.description");
+    assert.equal(typeof advisor.skillCount, "number");
+    assert.ok(Number(advisor.skillCount) > 0, "dashboard advisor.skillCount should be positive");
+    assertString(advisor.riskLevel, "dashboard advisor.riskLevel");
+    assert.equal(typeof advisor.requiresHumanApproval, "boolean");
+  }
+
+  for (const field of [
+    "totalEvents",
+    "successCount",
+    "errorCount",
+    "advisorRouteCount",
+    "advisorExecuteCount",
+    "skillExecuteCount",
+    "apiErrorCount",
+  ]) {
+    assert.equal(typeof audit.stats[field], "number", `dashboard audit stats ${field}`);
+  }
+
+  for (const event of audit.recentEvents) {
+    assertAuditEventShape(event);
+  }
+}
+
 function assertRouteSuccess(
   body: Record<string, unknown>,
   advisor: string,
@@ -836,6 +875,71 @@ test("audit endpoint returns newest events first with limit and request id", asy
     assertJsonObject(body.events[0], "latest audit event");
     assert.equal(body.events[0].eventType, "skill.execute");
     assert.equal(body.events[0].requestId, "audit-list-second");
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+  }
+});
+
+test("dashboard endpoint returns advisor summary, audit stats, and does not record reads", async () => {
+  clearApiAuditEvents();
+  const port = await listenForTest();
+
+  try {
+    await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "Schedule maintenance for the property inspection." }),
+      { requestId: "dashboard-first" },
+    );
+    await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "maintenance_triage",
+        context: {
+          message: "Pool pump maintenance issue",
+          urgency: "medium",
+        },
+      }),
+      { requestId: "dashboard-second" },
+    );
+
+    const beforeReadCount = listApiAuditEvents({ limit: 100 }).length;
+    const response = await requestJson(
+      port,
+      "GET",
+      "/agents/dashboard?limit=1",
+      undefined,
+      { requestId: "dashboard-request" },
+    );
+    const afterReadCount = listApiAuditEvents({ limit: 100 }).length;
+
+    assert.equal(response.statusCode, 200);
+    assertJsonResponse(response);
+    assertRequestIdHeader(response, "dashboard-request");
+    assert.equal(afterReadCount, beforeReadCount);
+
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    assertDashboardShape(body.dashboard);
+    assertJsonObject(body.dashboard, "dashboard body");
+    const dashboard = body.dashboard;
+    assertJsonObject(dashboard.audit, "dashboard audit");
+    const audit = dashboard.audit;
+    assert.ok(Array.isArray(audit.recentEvents));
+    assert.equal(audit.recentEvents.length, 1);
+    assertJsonObject(audit.recentEvents[0], "dashboard latest event");
+    assert.equal(audit.recentEvents[0].requestId, "dashboard-second");
+    assertJsonObject(audit.stats, "dashboard stats");
+    assert.equal(audit.stats.totalEvents, 2);
+    assert.equal(audit.stats.successCount, 2);
+    assert.equal(audit.stats.errorCount, 0);
+    assert.equal(audit.stats.advisorRouteCount, 1);
+    assert.equal(audit.stats.advisorExecuteCount, 0);
+    assert.equal(audit.stats.skillExecuteCount, 1);
+    assert.equal(audit.stats.apiErrorCount, 0);
   } finally {
     await closeServer();
     clearApiAuditEvents();

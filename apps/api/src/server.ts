@@ -3,6 +3,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 
 import { ApiAuditEventType, ApiAuditStatus, listApiAuditEvents, recordApiAuditEvent } from "./agents/audit-trail.js";
+import { buildAdvisorDashboardSummary } from "./agents/dashboard.js";
 import { executeFirstSkillForRoute } from "./agents/executor.js";
 import { orchestrateAgentRequest } from "./agents/orchestrator.js";
 import { SkillExecutionContext, executeSkill } from "./agents/skill-executor.js";
@@ -588,6 +589,21 @@ export const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && requestPath === "/agents/dashboard") {
+      sendJson(
+        response,
+        200,
+        {
+          dashboard: buildAdvisorDashboardSummary({
+            limit: auditLimitFromUrl(request.url),
+          }),
+        },
+        requestId,
+      );
+      logRequest(requestId, request.method, request.url, 200);
+      return;
+    }
+
     if (request.method === "POST" && requestPath === "/agents/route") {
       await handleAgentsRoute(request, response, requestId);
       logRequest(requestId, request.method, request.url, response.statusCode);
@@ -614,6 +630,7 @@ export const server = createServer(async (request, response) => {
       "/agents/execute",
       "/agents/skills/execute",
       "/agents/audit",
+      "/agents/dashboard",
     ]);
 
     if (knownPaths.has(requestPath)) {

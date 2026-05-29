@@ -5,6 +5,7 @@ import { server } from "../dist/server.js";
 const ROUTE_PATH = "/agents/route";
 const SKILL_EXECUTE_PATH = "/agents/skills/execute";
 const AUDIT_PATH = "/agents/audit";
+const DASHBOARD_PATH = "/agents/dashboard";
 const host = "127.0.0.1";
 let port = 0;
 
@@ -318,6 +319,32 @@ async function assertAuditEndpoint() {
   }
 }
 
+async function assertDashboardEndpoint() {
+  const response = await getJson(`${DASHBOARD_PATH}?limit=5`);
+
+  assert(
+    response.statusCode === 200,
+    `/agents/dashboard: expected HTTP 200, got ${response.statusCode}`,
+  );
+
+  const parsed = JSON.parse(response.body);
+
+  assert(parsed.dashboard, "/agents/dashboard: expected dashboard");
+  assert(parsed.dashboard.status === "ok", "/agents/dashboard: expected ok status");
+  assert(
+    Array.isArray(parsed.dashboard.advisors),
+    "/agents/dashboard: expected advisors array",
+  );
+  assert(
+    parsed.dashboard.advisors.length > 0,
+    "/agents/dashboard: expected at least one advisor",
+  );
+  assert(
+    parsed.dashboard.audit && typeof parsed.dashboard.audit.stats === "object",
+    "/agents/dashboard: expected audit stats object",
+  );
+}
+
 await new Promise((resolve) => {
   server.listen(0, host, () => {
     const address = server.address();
@@ -373,6 +400,9 @@ try {
 
   await assertAuditEndpoint();
   console.log("PASS /agents/audit");
+
+  await assertDashboardEndpoint();
+  console.log("PASS /agents/dashboard");
 } finally {
   await new Promise((resolve, reject) => {
     server.close((error) => {
