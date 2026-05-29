@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 
+import { clearApiAuditEvents, listApiAuditEvents } from "./agents/audit-trail.js";
 import { parseRouteRequestBody, server } from "./server.js";
 
 type TestResponse = {
@@ -295,6 +296,40 @@ function assertSkillExecutionShape(value: unknown, expectedSkillId: string): voi
   assertStringArray(value.riskFlags, "skill execution.riskFlags");
   assertString(value.handoffNotes, "skill execution.handoffNotes");
   assert.equal(value.requestId, "test-request-id");
+}
+
+function assertAuditEventShape(value: unknown): void {
+  assertJsonObject(value, "audit event");
+  assertString(value.id, "audit event.id");
+  assertString(value.requestId, "audit event.requestId");
+  assertString(value.timestamp, "audit event.timestamp");
+  assertString(value.method, "audit event.method");
+  assertString(value.route, "audit event.route");
+  assert.ok(
+    ["advisor.route", "advisor.execute", "skill.execute", "api.error"].includes(String(value.eventType)),
+  );
+  assert.ok(["success", "error"].includes(String(value.status)));
+
+  if ("inputSummary" in value) {
+    assertString(value.inputSummary, "audit event.inputSummary");
+    assert.ok(value.inputSummary.length <= 160);
+  }
+
+  if ("selectedSkillIds" in value) {
+    assertStringArray(value.selectedSkillIds, "audit event.selectedSkillIds");
+  }
+
+  if ("planStepCount" in value) {
+    assert.equal(typeof value.planStepCount, "number");
+  }
+
+  if ("actionPlanStepCount" in value) {
+    assert.equal(typeof value.actionPlanStepCount, "number");
+  }
+
+  if ("errorCode" in value) {
+    assertString(value.errorCode, "audit event.errorCode");
+  }
 }
 
 function assertRouteSuccess(
@@ -651,5 +686,158 @@ test("missing request id generates a non-empty request id on responses", async (
     assert.equal(body.error.requestId, invalidJson.headers["x-request-id"]);
   } finally {
     await closeServer();
+  }
+});
+
+test("advisor and skill endpoints record in-memory audit events", async () => {
+  clearApiAuditEvents();
+  const port = await listenForTest();
+  const longInput = `Schedule maintenance ${"for the west guest house ".repeat(12)}`;
+
+  try {
+    const route = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: longInput }),
+      { requestId: "audit-route-request" },
+    );
+    const execute = await requestJson(
+      port,
+      "POST",
+      "/agents/execute",
+      JSON.stringify({
+        message: "The pool maintenance vendor missed the appointment again.",
+        context: { urgency: "medium" },
+      }),
+      { requestId: "audit-execute-request" },
+    );
+    const skillExecute = await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "maintenance_triage",
+        context: {
+          message: "Pool pump maintenance issue",
+          urgency: "medium",
+        },
+      }),
+      { requestId: "audit-skill-request" },
+    );
+    const invalidInput = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "" }),
+      { requestId: "audit-error-request" },
+    );
+
+    assert.equal(route.statusCode, 200);
+    assert.equal(execute.statusCode, 200);
+    assert.equal(skillExecute.statusCode, 200);
+    assert.equal(invalidInput.statusCode, 400);
+
+    const events = listApiAuditEvents({ limit: 10 });
+
+    assert.equal(events.length, 4);
+    assert.deepEqual(
+      events.map((event) => event.eventType),
+      ["api.error", "skill.execute", "advisor.execute", "advisor.route"],
+    );
+
+    const routeEvent = events.find((event) => event.eventType === "advisor.route");
+    const executeEvent = events.find((event) => event.eventType === "advisor.execute");
+    const skillEvent = events.find((event) => event.eventType === "skill.execute");
+    const errorEvent = events.find((event) => event.eventType === "api.error");
+
+    assert.ok(routeEvent);
+    assert.equal(routeEvent.requestId, "audit-route-request");
+    assert.equal(routeEvent.method, "POST");
+    assert.equal(routeEvent.route, "/agents/route");
+    assert.equal(routeEvent.status, "success");
+    assert.equal(routeEvent.advisor, "Estate Advisor");
+    assert.ok(routeEvent.inputSummary);
+    assert.equal(routeEvent.inputSummary.length, 160);
+    assert.ok(!routeEvent.inputSummary.includes("undefined"));
+    assert.ok(Array.isArray(routeEvent.selectedSkillIds));
+    assert.ok(routeEvent.selectedSkillIds.length > 0);
+    assert.ok((routeEvent.planStepCount ?? 0) > 0);
+    assert.ok((routeEvent.actionPlanStepCount ?? 0) > 0);
+
+    assert.ok(executeEvent);
+    assert.equal(executeEvent.requestId, "audit-execute-request");
+    assert.equal(executeEvent.eventType, "advisor.execute");
+    assert.equal(executeEvent.status, "success");
+    assert.equal(executeEvent.advisor, "Estate Advisor");
+    assert.ok(Array.isArray(executeEvent.selectedSkillIds));
+    assert.ok(executeEvent.selectedSkillIds.length > 0);
+
+    assert.ok(skillEvent);
+    assert.equal(skillEvent.requestId, "audit-skill-request");
+    assert.equal(skillEvent.eventType, "skill.execute");
+    assert.equal(skillEvent.status, "success");
+    assert.equal(skillEvent.advisor, "Estate Advisor");
+    assert.deepEqual(skillEvent.selectedSkillIds, ["maintenance_triage"]);
+
+    assert.ok(errorEvent);
+    assert.equal(errorEvent.requestId, "audit-error-request");
+    assert.equal(errorEvent.eventType, "api.error");
+    assert.equal(errorEvent.status, "error");
+    assert.equal(errorEvent.errorCode, "INVALID_ROUTE_INPUT");
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+  }
+});
+
+test("audit endpoint returns newest events first with limit and request id", async () => {
+  clearApiAuditEvents();
+  const port = await listenForTest();
+
+  try {
+    await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "Schedule maintenance for the property inspection." }),
+      { requestId: "audit-list-first" },
+    );
+    await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "maintenance_triage",
+        context: {
+          message: "Pool pump maintenance issue",
+          urgency: "medium",
+        },
+      }),
+      { requestId: "audit-list-second" },
+    );
+
+    const response = await requestJson(
+      port,
+      "GET",
+      "/agents/audit?limit=1",
+      undefined,
+      { requestId: "audit-list-request" },
+    );
+
+    assert.equal(response.statusCode, 200);
+    assertJsonResponse(response);
+    assertRequestIdHeader(response, "audit-list-request");
+
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    assert.ok(Array.isArray(body.events));
+    assert.equal(body.events.length, 1);
+    assertAuditEventShape(body.events[0]);
+    assertJsonObject(body.events[0], "latest audit event");
+    assert.equal(body.events[0].eventType, "skill.execute");
+    assert.equal(body.events[0].requestId, "audit-list-second");
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
   }
 });
