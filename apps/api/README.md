@@ -12,6 +12,7 @@ Local-first TypeScript API for advisor routing, dry-run skill execution, audit v
 - `POST /agents/skills/execute` - execute a selected skill in dry-run mode.
 - `GET /agents/audit` - in-memory advisor/API audit events.
 - `GET /agents/dashboard` - advisor summary cards and in-memory audit stats.
+- `GET /agents/metrics` - in-memory operational metrics for HTTP, process, and audit activity.
 
 ## Local Commands
 
@@ -44,7 +45,7 @@ npm start
 - `NODE_ENV` - set to `production` for production runtime behavior.
 - `SOVEREIGN_ADMIN_API_KEY` - admin key for internal visibility routes.
 
-When `SOVEREIGN_ADMIN_API_KEY` is configured, requests to `GET /agents/audit` and `GET /agents/dashboard` must include:
+When `SOVEREIGN_ADMIN_API_KEY` is configured, requests to `GET /agents/audit`, `GET /agents/dashboard`, and `GET /agents/metrics` must include:
 
 ```text
 x-admin-api-key: <configured key>
@@ -85,8 +86,15 @@ The server handles `SIGTERM` and `SIGINT` by closing the HTTP server before exit
 
 `npm run smoke:production` builds the API, starts the production server on a temporary local port, verifies `GET /health`, sends `SIGTERM`, and confirms clean shutdown.
 
+## Observability
+
+Current mode: in-memory metrics. `GET /agents/metrics` exposes process, HTTP, audit, and telemetry event summaries for local debugging and operational checks. It is admin-protected and does not expose secrets, request bodies, or full user input.
+
+Next integration target: OpenTelemetry Collector. The API now records stable telemetry event concepts such as `http.request`, `advisor.route`, `advisor.execute`, `skill.execute`, and `api.error` with correlation fields like `requestId`, route, method, status code, advisor, and duration where available. A future exporter can send these events to an OpenTelemetry Collector, which can receive, process, and export telemetry to a backend without rewriting the HTTP server.
+
 ## Notes
 
 - Advisor execution is dry-run and does not call external systems.
 - `/agents/audit` and `/agents/dashboard` are read-only visibility endpoints.
-- Audit and dashboard data are currently in-memory only and reset when the process restarts.
+- `/agents/metrics` is a read-only admin visibility endpoint. It does not expose secrets, request bodies, or environment variable values beyond the environment name.
+- Audit, dashboard, and metrics data are currently in-memory only and reset when the process restarts.

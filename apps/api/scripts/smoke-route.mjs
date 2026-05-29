@@ -6,6 +6,7 @@ const ROUTE_PATH = "/agents/route";
 const SKILL_EXECUTE_PATH = "/agents/skills/execute";
 const AUDIT_PATH = "/agents/audit";
 const DASHBOARD_PATH = "/agents/dashboard";
+const METRICS_PATH = "/agents/metrics";
 const host = "127.0.0.1";
 let port = 0;
 
@@ -117,7 +118,9 @@ function getJson(path) {
 
   if (
     process.env.SOVEREIGN_ADMIN_API_KEY &&
-    (path.startsWith(AUDIT_PATH) || path.startsWith(DASHBOARD_PATH))
+    (path.startsWith(AUDIT_PATH) ||
+      path.startsWith(DASHBOARD_PATH) ||
+      path.startsWith(METRICS_PATH))
   ) {
     headers["x-admin-api-key"] = process.env.SOVEREIGN_ADMIN_API_KEY;
   }
@@ -354,6 +357,31 @@ async function assertDashboardEndpoint() {
   );
 }
 
+async function assertMetricsEndpoint() {
+  const response = await getJson(METRICS_PATH);
+
+  assert(
+    response.statusCode === 200,
+    `/agents/metrics: expected HTTP 200, got ${response.statusCode}`,
+  );
+
+  const parsed = JSON.parse(response.body);
+
+  assert(parsed.metrics, "/agents/metrics: expected metrics");
+  assert(
+    parsed.metrics.process && typeof parsed.metrics.process === "object",
+    "/agents/metrics: expected process metrics",
+  );
+  assert(
+    parsed.metrics.http && typeof parsed.metrics.http === "object",
+    "/agents/metrics: expected http metrics",
+  );
+  assert(
+    parsed.metrics.audit && typeof parsed.metrics.audit === "object",
+    "/agents/metrics: expected audit metrics",
+  );
+}
+
 await new Promise((resolve) => {
   server.listen(0, host, () => {
     const address = server.address();
@@ -412,6 +440,9 @@ try {
 
   await assertDashboardEndpoint();
   console.log("PASS /agents/dashboard");
+
+  await assertMetricsEndpoint();
+  console.log("PASS /agents/metrics");
 } finally {
   await new Promise((resolve, reject) => {
     server.close((error) => {

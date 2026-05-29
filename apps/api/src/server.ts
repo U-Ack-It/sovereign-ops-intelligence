@@ -9,6 +9,7 @@ import { buildAdvisorDashboardSummary } from "./agents/dashboard.js";
 import { executeFirstSkillForRoute } from "./agents/executor.js";
 import { orchestrateAgentRequest } from "./agents/orchestrator.js";
 import { SkillExecutionContext, executeSkill } from "./agents/skill-executor.js";
+import { getApiMetricsSnapshot, recordHttpRequestMetric, recordTelemetryEvent } from "./observability.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MAX_BODY_BYTES = 1_000_000;
@@ -81,7 +82,25 @@ function requestIdFromHeader(request: IncomingMessage): string {
   return generateRequestId();
 }
 
-function logRequest(requestId: string, method: string | undefined, url: string | undefined, statusCode: number): void {
+function logRequest(
+  requestId: string,
+  method: string | undefined,
+  url: string | undefined,
+  statusCode: number,
+  startedAtMs: number,
+): void {
+  try {
+    recordHttpRequestMetric({
+      requestId,
+      method,
+      route: metricRouteLabel(url),
+      statusCode,
+      durationMs: Date.now() - startedAtMs,
+    });
+  } catch {
+    // Metrics recording must never block the API response path.
+  }
+
   console.log(`[${requestId}] ${method ?? "UNKNOWN"} ${url ?? "/"} ${statusCode}`);
 }
 
@@ -91,6 +110,23 @@ function requestPathFromUrl(url: string | undefined): string {
   } catch {
     return url ?? "/";
   }
+}
+
+function metricRouteLabel(url: string | undefined): string {
+  const path = requestPathFromUrl(url);
+  const knownMetricRoutes = new Set([
+    "/health",
+    "/ready",
+    "/version",
+    "/agents/audit",
+    "/agents/dashboard",
+    "/agents/metrics",
+    "/agents/route",
+    "/agents/execute",
+    "/agents/skills/execute",
+  ]);
+
+  return knownMetricRoutes.has(path) ? path : "unknown";
 }
 
 function auditLimitFromUrl(url: string | undefined): number {
@@ -123,8 +159,16 @@ function safeRecordApiAuditEvent(input: {
 }): void {
   try {
     recordApiAuditEvent(input);
+    recordTelemetryEvent({
+      eventType: input.eventType,
+      requestId: input.requestId,
+      method: input.method,
+      route: input.route,
+      advisor: input.advisor,
+      errorCode: input.errorCode,
+    });
   } catch {
-    // Audit recording must never block the API response path.
+    // Audit and telemetry recording must never block the API response path.
   }
 }
 
@@ -536,6 +580,7 @@ async function handleAgentsSkillExecute(
 }
 
 export const server = createServer(async (request, response) => {
+  const requestStartedAt = Date.now();
   const requestId = requestIdFromHeader(request);
   const packageMetadata = getPackageMetadata();
   const requestPath = requestPathFromUrl(request.url);
@@ -553,13 +598,13 @@ export const server = createServer(async (request, response) => {
         },
         requestId,
       );
-      logRequest(requestId, request.method, request.url, 200);
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
       return;
     }
 
     if (request.method === "GET" && requestPath === "/ready") {
       sendJson(response, 200, { status: "ready", service: SERVICE_NAME }, requestId);
-      logRequest(requestId, request.method, request.url, 200);
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
       return;
     }
 
@@ -574,7 +619,7 @@ export const server = createServer(async (request, response) => {
         },
         requestId,
       );
-      logRequest(requestId, request.method, request.url, 200);
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
       return;
     }
 
@@ -586,7 +631,7 @@ export const server = createServer(async (request, response) => {
           method: request.method ?? "UNKNOWN",
           route: requestPath,
         });
-        logRequest(requestId, request.method, request.url, adminAuth.statusCode);
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode, requestStartedAt);
         return;
       }
 
@@ -598,7 +643,7 @@ export const server = createServer(async (request, response) => {
         },
         requestId,
       );
-      logRequest(requestId, request.method, request.url, 200);
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
       return;
     }
 
@@ -610,7 +655,7 @@ export const server = createServer(async (request, response) => {
           method: request.method ?? "UNKNOWN",
           route: requestPath,
         });
-        logRequest(requestId, request.method, request.url, adminAuth.statusCode);
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode, requestStartedAt);
         return;
       }
 
@@ -624,25 +669,49 @@ export const server = createServer(async (request, response) => {
         },
         requestId,
       );
-      logRequest(requestId, request.method, request.url, 200);
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
+      return;
+    }
+
+    if (request.method === "GET" && requestPath === "/agents/metrics") {
+      const adminAuth = verifyAdminRequest(request);
+
+      if (!adminAuth.ok) {
+        sendError(response, adminAuth.statusCode, adminAuth.error, requestId, {
+          method: request.method ?? "UNKNOWN",
+          route: requestPath,
+        });
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode, requestStartedAt);
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        {
+          metrics: getApiMetricsSnapshot(),
+        },
+        requestId,
+      );
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
       return;
     }
 
     if (request.method === "POST" && requestPath === "/agents/route") {
       await handleAgentsRoute(request, response, requestId);
-      logRequest(requestId, request.method, request.url, response.statusCode);
+      logRequest(requestId, request.method, request.url, response.statusCode, requestStartedAt);
       return;
     }
 
     if (request.method === "POST" && requestPath === "/agents/execute") {
       await handleAgentsExecute(request, response, requestId);
-      logRequest(requestId, request.method, request.url, response.statusCode);
+      logRequest(requestId, request.method, request.url, response.statusCode, requestStartedAt);
       return;
     }
 
     if (request.method === "POST" && requestPath === "/agents/skills/execute") {
       await handleAgentsSkillExecute(request, response, requestId);
-      logRequest(requestId, request.method, request.url, response.statusCode);
+      logRequest(requestId, request.method, request.url, response.statusCode, requestStartedAt);
       return;
     }
 
@@ -655,6 +724,7 @@ export const server = createServer(async (request, response) => {
       "/agents/skills/execute",
       "/agents/audit",
       "/agents/dashboard",
+      "/agents/metrics",
     ]);
 
     if (knownPaths.has(requestPath)) {
@@ -675,7 +745,7 @@ export const server = createServer(async (request, response) => {
           route: requestPath,
         },
       );
-      logRequest(requestId, request.method, request.url, 405);
+      logRequest(requestId, request.method, request.url, 405, requestStartedAt);
       return;
     }
 
@@ -695,14 +765,14 @@ export const server = createServer(async (request, response) => {
         route: requestPath,
       },
     );
-    logRequest(requestId, request.method, request.url, 404);
+    logRequest(requestId, request.method, request.url, 404, requestStartedAt);
   } catch (error) {
     if (error instanceof HttpRequestError) {
       sendError(response, error.statusCode, error.apiError, requestId, {
         method: request.method ?? "UNKNOWN",
         route: requestPath,
       });
-      logRequest(requestId, request.method, request.url, error.statusCode);
+      logRequest(requestId, request.method, request.url, error.statusCode, requestStartedAt);
       return;
     }
 
@@ -720,7 +790,7 @@ export const server = createServer(async (request, response) => {
         route: requestPath,
       },
     );
-    logRequest(requestId, request.method, request.url, 500);
+    logRequest(requestId, request.method, request.url, 500, requestStartedAt);
   }
 });
 

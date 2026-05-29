@@ -4,6 +4,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { clearApiAuditEvents, listApiAuditEvents } from "./agents/audit-trail.js";
+import { resetApiMetrics } from "./observability.js";
 import { parseRouteRequestBody, server } from "./server.js";
 
 type TestResponse = {
@@ -377,6 +378,69 @@ function assertDashboardShape(value: unknown): void {
 
   for (const event of audit.recentEvents) {
     assertAuditEventShape(event);
+  }
+}
+
+function assertMetricsShape(value: unknown): void {
+  assertJsonObject(value, "metrics");
+  assertString(value.generatedAt, "metrics.generatedAt");
+  assertJsonObject(value.process, "metrics.process");
+  assert.equal(typeof value.process.uptimeSeconds, "number");
+  assertString(value.process.nodeVersion, "metrics.process.nodeVersion");
+  assert.equal(typeof value.process.pid, "number");
+  assertString(value.process.environment, "metrics.process.environment");
+
+  assertJsonObject(value.http, "metrics.http");
+  assert.equal(typeof value.http.totalRequests, "number");
+  assert.equal(typeof value.http.successResponses, "number");
+  assert.equal(typeof value.http.errorResponses, "number");
+  assertJsonObject(value.http.statusCodeCounts, "metrics.http.statusCodeCounts");
+  assertJsonObject(value.http.routeCounts, "metrics.http.routeCounts");
+  assertJsonObject(value.http.methodCounts, "metrics.http.methodCounts");
+
+  assertJsonObject(value.audit, "metrics.audit");
+  for (const field of [
+    "totalRetainedEvents",
+    "successCount",
+    "errorCount",
+    "advisorRouteCount",
+    "advisorExecuteCount",
+    "skillExecuteCount",
+    "apiErrorCount",
+  ]) {
+    assert.equal(typeof value.audit[field], "number", `metrics audit ${field}`);
+  }
+
+  assertJsonObject(value.telemetry, "metrics.telemetry");
+  assert.ok(Array.isArray(value.telemetry.recentEvents), "metrics.telemetry.recentEvents should be an array");
+
+  for (const event of value.telemetry.recentEvents) {
+    assertJsonObject(event, "telemetry event");
+    assertString(event.timestamp, "telemetry event.timestamp");
+    assert.ok(
+      ["http.request", "advisor.route", "advisor.execute", "skill.execute", "api.error"].includes(
+        String(event.eventType),
+      ),
+    );
+    assertString(event.requestId, "telemetry event.requestId");
+    assertString(event.route, "telemetry event.route");
+    assertString(event.method, "telemetry event.method");
+
+    if ("statusCode" in event) {
+      assert.equal(typeof event.statusCode, "number");
+    }
+
+    if ("advisor" in event) {
+      assertString(event.advisor, "telemetry event.advisor");
+    }
+
+    if ("durationMs" in event) {
+      assert.equal(typeof event.durationMs, "number");
+    }
+
+    if ("errorCode" in event) {
+      assertString(event.errorCode, "telemetry event.errorCode");
+    }
   }
 }
 
@@ -964,10 +1028,136 @@ test("dashboard endpoint returns advisor summary, audit stats, and does not reco
   }
 });
 
+test("metrics endpoint returns process, HTTP, and audit metrics", async () => {
+  clearApiAuditEvents();
+  resetApiMetrics();
+  const port = await listenForTest();
+
+  try {
+    const route = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "Schedule maintenance for the property inspection." }),
+      { requestId: "metrics-route" },
+    );
+    const execute = await requestJson(
+      port,
+      "POST",
+      "/agents/execute",
+      JSON.stringify({
+        message: "The pool maintenance vendor missed the appointment again.",
+        context: { urgency: "medium" },
+      }),
+      { requestId: "metrics-execute" },
+    );
+    const skillExecute = await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "maintenance_triage",
+        context: {
+          message: "Pool pump maintenance issue",
+          urgency: "medium",
+        },
+      }),
+      { requestId: "metrics-skill" },
+    );
+    const invalidInput = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "" }),
+      { requestId: "metrics-error" },
+    );
+    const response = await requestJson(port, "GET", "/agents/metrics", undefined, {
+      requestId: "metrics-request",
+    });
+
+    assert.equal(route.statusCode, 200);
+    assert.equal(execute.statusCode, 200);
+    assert.equal(skillExecute.statusCode, 200);
+    assert.equal(invalidInput.statusCode, 400);
+    assert.equal(response.statusCode, 200);
+    assertJsonResponse(response);
+    assertRequestIdHeader(response, "metrics-request");
+
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    assertMetricsShape(body.metrics);
+    assertJsonObject(body.metrics, "metrics response");
+    const metrics = body.metrics;
+    assertJsonObject(metrics.http, "metrics.http");
+    assertJsonObject(metrics.audit, "metrics.audit");
+    assertJsonObject(metrics.http.routeCounts, "metrics.http.routeCounts");
+    assertJsonObject(metrics.http.statusCodeCounts, "metrics.http.statusCodeCounts");
+    assertJsonObject(metrics.http.methodCounts, "metrics.http.methodCounts");
+    assertJsonObject(metrics.telemetry, "metrics.telemetry");
+    assert.ok(Array.isArray(metrics.telemetry.recentEvents));
+    const routeCounts = metrics.http.routeCounts;
+    const statusCodeCounts = metrics.http.statusCodeCounts;
+    const methodCounts = metrics.http.methodCounts;
+    const telemetryEvents = metrics.telemetry.recentEvents;
+
+    assert.equal(metrics.http.totalRequests, 4);
+    assert.equal(metrics.http.successResponses, 3);
+    assert.equal(metrics.http.errorResponses, 1);
+    assert.equal(routeCounts["/agents/route"], 2);
+    assert.equal(routeCounts["/agents/execute"], 1);
+    assert.equal(routeCounts["/agents/skills/execute"], 1);
+    assert.equal(statusCodeCounts["200"], 3);
+    assert.equal(statusCodeCounts["400"], 1);
+    assert.equal(methodCounts.POST, 4);
+
+    assert.equal(metrics.audit.totalRetainedEvents, 4);
+    assert.equal(metrics.audit.successCount, 3);
+    assert.equal(metrics.audit.errorCount, 1);
+    assert.equal(metrics.audit.advisorRouteCount, 1);
+    assert.equal(metrics.audit.advisorExecuteCount, 1);
+    assert.equal(metrics.audit.skillExecuteCount, 1);
+    assert.equal(metrics.audit.apiErrorCount, 1);
+
+    const httpRouteEvent = telemetryEvents.find((event) => {
+      assertJsonObject(event, "telemetry event");
+      return event.eventType === "http.request" && event.requestId === "metrics-route";
+    });
+    const advisorRouteEvent = telemetryEvents.find((event) => {
+      assertJsonObject(event, "telemetry event");
+      return event.eventType === "advisor.route" && event.requestId === "metrics-route";
+    });
+    const apiErrorEvent = telemetryEvents.find((event) => {
+      assertJsonObject(event, "telemetry event");
+      return event.eventType === "api.error" && event.requestId === "metrics-error";
+    });
+
+    assertJsonObject(httpRouteEvent, "http route telemetry event");
+    assert.equal(httpRouteEvent.route, "/agents/route");
+    assert.equal(httpRouteEvent.method, "POST");
+    assert.equal(httpRouteEvent.statusCode, 200);
+    assert.equal(typeof httpRouteEvent.durationMs, "number");
+
+    assertJsonObject(advisorRouteEvent, "advisor route telemetry event");
+    assert.equal(advisorRouteEvent.advisor, "Estate Advisor");
+    assert.equal(advisorRouteEvent.route, "/agents/route");
+
+    assertJsonObject(apiErrorEvent, "api error telemetry event");
+    assert.equal(apiErrorEvent.errorCode, "INVALID_ROUTE_INPUT");
+
+    const serializedTelemetry = JSON.stringify(telemetryEvents);
+    assert.ok(!serializedTelemetry.includes("Schedule maintenance for the property inspection."));
+    assert.ok(!serializedTelemetry.includes("Pool pump maintenance issue"));
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+    resetApiMetrics();
+  }
+});
+
 test("admin visibility endpoints stay open in local mode when no admin key is configured", async () => {
   const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
   const originalNodeEnv = process.env.NODE_ENV;
   clearApiAuditEvents();
+  resetApiMetrics();
   delete process.env.SOVEREIGN_ADMIN_API_KEY;
   process.env.NODE_ENV = "test";
 
@@ -980,6 +1170,9 @@ test("admin visibility endpoints stay open in local mode when no admin key is co
     const dashboard = await requestJson(port, "GET", "/agents/dashboard", undefined, {
       requestId: "local-dashboard-request",
     });
+    const metrics = await requestJson(port, "GET", "/agents/metrics", undefined, {
+      requestId: "local-metrics-request",
+    });
 
     assert.equal(audit.statusCode, 200);
     assertJsonResponse(audit);
@@ -988,20 +1181,28 @@ test("admin visibility endpoints stay open in local mode when no admin key is co
     assert.equal(dashboard.statusCode, 200);
     assertJsonResponse(dashboard);
     assertRequestIdHeader(dashboard, "local-dashboard-request");
+
+    assert.equal(metrics.statusCode, 200);
+    assertJsonResponse(metrics);
+    assertRequestIdHeader(metrics, "local-metrics-request");
+    const metricsBody = JSON.parse(metrics.body) as Record<string, unknown>;
+    assertMetricsShape(metricsBody.metrics);
   } finally {
     await closeServer();
     clearApiAuditEvents();
+    resetApiMetrics();
     restoreEnv("SOVEREIGN_ADMIN_API_KEY", originalAdminKey);
     restoreEnv("NODE_ENV", originalNodeEnv);
   }
 });
 
-test("configured admin key protects audit and dashboard endpoints", async () => {
+test("configured admin key protects audit, dashboard, and metrics endpoints", async () => {
   const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
   const originalNodeEnv = process.env.NODE_ENV;
   process.env.SOVEREIGN_ADMIN_API_KEY = "test-admin-key";
   process.env.NODE_ENV = "test";
   clearApiAuditEvents();
+  resetApiMetrics();
 
   const port = await listenForTest();
 
@@ -1012,12 +1213,19 @@ test("configured admin key protects audit and dashboard endpoints", async () => 
     const dashboardMissing = await requestJson(port, "GET", "/agents/dashboard", undefined, {
       requestId: "admin-dashboard-missing",
     });
+    const metricsMissing = await requestJson(port, "GET", "/agents/metrics", undefined, {
+      requestId: "admin-metrics-missing",
+    });
     const auditWrong = await requestJson(port, "GET", "/agents/audit", undefined, {
       requestId: "admin-audit-wrong",
       adminApiKey: "wrong-admin-key",
     });
     const dashboardWrong = await requestJson(port, "GET", "/agents/dashboard", undefined, {
       requestId: "admin-dashboard-wrong",
+      adminApiKey: "wrong-admin-key",
+    });
+    const metricsWrong = await requestJson(port, "GET", "/agents/metrics", undefined, {
+      requestId: "admin-metrics-wrong",
       adminApiKey: "wrong-admin-key",
     });
     const auditCorrect = await requestJson(port, "GET", "/agents/audit", undefined, {
@@ -1028,11 +1236,17 @@ test("configured admin key protects audit and dashboard endpoints", async () => 
       requestId: "admin-dashboard-correct",
       adminApiKey: "test-admin-key",
     });
+    const metricsCorrect = await requestJson(port, "GET", "/agents/metrics", undefined, {
+      requestId: "admin-metrics-correct",
+      adminApiKey: "test-admin-key",
+    });
 
     assertStructuredError(auditMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-audit-missing");
     assertStructuredError(dashboardMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-dashboard-missing");
+    assertStructuredError(metricsMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-metrics-missing");
     assertStructuredError(auditWrong, 403, "ADMIN_AUTH_INVALID", "admin-audit-wrong");
     assertStructuredError(dashboardWrong, 403, "ADMIN_AUTH_INVALID", "admin-dashboard-wrong");
+    assertStructuredError(metricsWrong, 403, "ADMIN_AUTH_INVALID", "admin-metrics-wrong");
 
     assert.equal(auditCorrect.statusCode, 200);
     assertJsonResponse(auditCorrect);
@@ -1043,20 +1257,28 @@ test("configured admin key protects audit and dashboard endpoints", async () => 
     assertRequestIdHeader(dashboardCorrect, "admin-dashboard-correct");
     const dashboardBody = JSON.parse(dashboardCorrect.body) as Record<string, unknown>;
     assertDashboardShape(dashboardBody.dashboard);
+
+    assert.equal(metricsCorrect.statusCode, 200);
+    assertJsonResponse(metricsCorrect);
+    assertRequestIdHeader(metricsCorrect, "admin-metrics-correct");
+    const metricsBody = JSON.parse(metricsCorrect.body) as Record<string, unknown>;
+    assertMetricsShape(metricsBody.metrics);
   } finally {
     await closeServer();
     clearApiAuditEvents();
+    resetApiMetrics();
     restoreEnv("SOVEREIGN_ADMIN_API_KEY", originalAdminKey);
     restoreEnv("NODE_ENV", originalNodeEnv);
   }
 });
 
-test("production mode fails closed for admin visibility endpoints without configured key", async () => {
+test("production mode fails closed for admin visibility and metrics endpoints without configured key", async () => {
   const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
   const originalNodeEnv = process.env.NODE_ENV;
   delete process.env.SOVEREIGN_ADMIN_API_KEY;
   process.env.NODE_ENV = "production";
   clearApiAuditEvents();
+  resetApiMetrics();
 
   const port = await listenForTest();
 
@@ -1067,12 +1289,17 @@ test("production mode fails closed for admin visibility endpoints without config
     const dashboard = await requestJson(port, "GET", "/agents/dashboard", undefined, {
       requestId: "prod-dashboard-request",
     });
+    const metrics = await requestJson(port, "GET", "/agents/metrics", undefined, {
+      requestId: "prod-metrics-request",
+    });
 
     assertStructuredError(audit, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-audit-request");
     assertStructuredError(dashboard, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-dashboard-request");
+    assertStructuredError(metrics, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-metrics-request");
   } finally {
     await closeServer();
     clearApiAuditEvents();
+    resetApiMetrics();
     restoreEnv("SOVEREIGN_ADMIN_API_KEY", originalAdminKey);
     restoreEnv("NODE_ENV", originalNodeEnv);
   }
