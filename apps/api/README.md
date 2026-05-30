@@ -182,6 +182,31 @@ Validate the MCP catalog with:
 npm run mcp:check
 ```
 
+## MCP Safety Policy
+
+The MCP bridge has an explicit local safety policy around tools, resources, prompts, input sizes, and tool-call budgets.
+
+Allowlists:
+
+- Tools: `sovereign_advisor_route`, `sovereign_advisor_execute`, `sovereign_skill_execute`
+- Resources: `sovereign://openapi`, `sovereign://docs/architecture`, `sovereign://docs/api`
+- Prompts: `sovereign-operations-triage`, `sovereign-security-review`, `sovereign-compliance-review`
+
+Limits:
+
+- Operator input: 2,000 characters
+- Skill id: 120 characters
+- Tool calls per local session: 20
+- Tool calls per minute: 10
+- Resource read size: 20,000 characters
+- Prompt size: 4,000 characters
+
+The policy blocks forbidden surfaces and sensitive text categories before execution or resource return. Admin visibility endpoints remain intentionally unavailable through MCP. Validate policy metadata with:
+
+```sh
+npm run mcp:policy:check
+```
+
 ## Notes
 
 - Advisor execution is dry-run and does not call external systems.

@@ -61,3 +61,24 @@ MCP prompts:
 - `sovereign-compliance-review`
 
 The MCP bridge is local-first and does not expose internal visibility endpoints or environment values. Do not commit MCP client configuration containing credentials.
+
+## MCP Safety Policy
+
+The MCP bridge enforces a policy before any local tool call, resource read, or prompt return.
+
+Allowlists:
+
+- Tools: `sovereign_advisor_route`, `sovereign_advisor_execute`, `sovereign_skill_execute`
+- Resources: `sovereign://openapi`, `sovereign://docs/architecture`, `sovereign://docs/api`
+- Prompts: `sovereign-operations-triage`, `sovereign-security-review`, `sovereign-compliance-review`
+
+Budgets and limits:
+
+- Max input length: 2,000 characters
+- Max skill id length: 120 characters
+- Max tool calls per session: 20
+- Max tool calls per minute: 10
+- Max resource read: 20,000 characters
+- Max prompt size: 4,000 characters
+
+Policy errors are structured with a code, message, policy area, and limit where relevant. Admin visibility endpoints are intentionally not exposed as MCP tools or resources.

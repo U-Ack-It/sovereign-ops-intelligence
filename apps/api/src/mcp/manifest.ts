@@ -1,3 +1,5 @@
+import { MCP_POLICY_LIMITS } from "./policy.js";
+
 export type McpToolDefinition = {
   name: string;
   title: string;
@@ -5,7 +7,7 @@ export type McpToolDefinition = {
   inputSchema: {
     type: "object";
     required: string[];
-    properties: Record<string, { type: "string"; minLength?: number }>;
+    properties: Record<string, { type: "string"; minLength?: number; maxLength?: number }>;
     additionalProperties: false;
   };
 };
@@ -35,7 +37,7 @@ export const SOVEREIGN_MCP_TOOLS: McpToolDefinition[] = [
       required: ["input"],
       additionalProperties: false,
       properties: {
-        input: { type: "string", minLength: 1 },
+        input: { type: "string", minLength: 1, maxLength: MCP_POLICY_LIMITS.maxInputChars },
       },
     },
   },
@@ -48,7 +50,7 @@ export const SOVEREIGN_MCP_TOOLS: McpToolDefinition[] = [
       required: ["input"],
       additionalProperties: false,
       properties: {
-        input: { type: "string", minLength: 1 },
+        input: { type: "string", minLength: 1, maxLength: MCP_POLICY_LIMITS.maxInputChars },
       },
     },
   },
@@ -61,8 +63,8 @@ export const SOVEREIGN_MCP_TOOLS: McpToolDefinition[] = [
       required: ["skillId", "input"],
       additionalProperties: false,
       properties: {
-        skillId: { type: "string", minLength: 1 },
-        input: { type: "string", minLength: 1 },
+        skillId: { type: "string", minLength: 1, maxLength: MCP_POLICY_LIMITS.maxSkillIdChars },
+        input: { type: "string", minLength: 1, maxLength: MCP_POLICY_LIMITS.maxInputChars },
       },
     },
   },

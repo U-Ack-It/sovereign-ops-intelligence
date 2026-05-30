@@ -20,6 +20,18 @@ import {
   SOVEREIGN_MCP_RESOURCES,
   SOVEREIGN_MCP_TOOLS,
 } from "./manifest.js";
+import {
+  McpPolicyError,
+  assertAllowedPrompt,
+  assertAllowedResource,
+  assertAllowedTool,
+  assertInputBudget,
+  assertPromptBudget,
+  assertResourceReadBudget,
+  assertSafeText,
+  assertSkillIdBudget,
+  recordToolInvocation,
+} from "./policy.js";
 
 type ToolArguments = Record<string, unknown> | undefined;
 
@@ -107,6 +119,14 @@ function toolError(message: string) {
   );
 }
 
+function policyError(error: unknown) {
+  if (error instanceof McpPolicyError) {
+    return textResult({ error: error.toJSON() }, true);
+  }
+
+  return toolError(error instanceof Error ? error.message : "Invalid MCP tool input.");
+}
+
 function routeInput(input: string) {
   return orchestrateAgentRequest({
     prompt: input,
@@ -119,6 +139,10 @@ function routeInput(input: string) {
 function registerToolHandlers(server: Server): void {
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: SOVEREIGN_MCP_TOOLS.map((tool) => ({
+      ...(() => {
+        assertAllowedTool(tool.name);
+        return {};
+      })(),
       name: tool.name,
       title: tool.title,
       description: tool.purpose,
@@ -136,8 +160,13 @@ function registerToolHandlers(server: Server): void {
     const args = request.params.arguments;
 
     try {
+      assertAllowedTool(request.params.name);
+      recordToolInvocation(request.params.name);
+
       if (request.params.name === "sovereign_advisor_route") {
         const input = readRequiredString(args, "input");
+        assertInputBudget(request.params.name, input);
+        assertSafeText("tool:sovereign_advisor_route.input", input);
         const requestId = createRequestId();
 
         return textResult({
@@ -148,6 +177,8 @@ function registerToolHandlers(server: Server): void {
 
       if (request.params.name === "sovereign_advisor_execute") {
         const input = readRequiredString(args, "input");
+        assertInputBudget(request.params.name, input);
+        assertSafeText("tool:sovereign_advisor_execute.input", input);
         const requestId = createRequestId();
         const route = routeInput(input);
 
@@ -164,6 +195,10 @@ function registerToolHandlers(server: Server): void {
       if (request.params.name === "sovereign_skill_execute") {
         const skillId = readRequiredString(args, "skillId");
         const input = readRequiredString(args, "input");
+        assertSkillIdBudget(skillId);
+        assertInputBudget(request.params.name, input);
+        assertSafeText("tool:sovereign_skill_execute.skillId", skillId);
+        assertSafeText("tool:sovereign_skill_execute.input", input);
 
         return textResult({
           requestId: createRequestId(),
@@ -173,7 +208,7 @@ function registerToolHandlers(server: Server): void {
 
       return toolError(`Unknown MCP tool: ${request.params.name}`);
     } catch (error) {
-      return toolError(error instanceof Error ? error.message : "Invalid MCP tool input.");
+      return policyError(error);
     }
   });
 }
@@ -181,6 +216,10 @@ function registerToolHandlers(server: Server): void {
 function registerResourceHandlers(server: Server): void {
   server.setRequestHandler(ListResourcesRequestSchema, () => ({
     resources: SOVEREIGN_MCP_RESOURCES.map((resource) => ({
+      ...(() => {
+        assertAllowedResource(resource.uri);
+        return {};
+      })(),
       uri: resource.uri,
       name: resource.name,
       title: resource.title,
@@ -190,35 +229,70 @@ function registerResourceHandlers(server: Server): void {
   }));
 
   server.setRequestHandler(ReadResourceRequestSchema, (request) => {
-    const resource = readResourceText(request.params.uri);
+    try {
+      assertAllowedResource(request.params.uri);
+      const resource = readResourceText(request.params.uri);
 
-    if (!resource) {
+      if (!resource) {
+        return {
+          contents: [
+            {
+              uri: request.params.uri,
+              mimeType: "text/plain",
+              text: JSON.stringify({
+                error: {
+                  code: "MCP_RESOURCE_NOT_ALLOWED",
+                  message: "MCP resource is not available.",
+                  policyArea: "resource",
+                },
+              }),
+            },
+          ],
+        };
+      }
+
+      assertResourceReadBudget(request.params.uri, resource.text);
+
+      return {
+        contents: [
+          {
+            uri: request.params.uri,
+            mimeType: resource.mimeType,
+            text: resource.text,
+          },
+        ],
+      };
+    } catch (error) {
+      const policyDetails =
+        error instanceof McpPolicyError
+          ? error.toJSON()
+          : {
+              code: "MCP_RESOURCE_NOT_ALLOWED",
+              message: "MCP resource request failed policy validation.",
+              policyArea: "resource",
+            };
+
       return {
         contents: [
           {
             uri: request.params.uri,
             mimeType: "text/plain",
-            text: "Resource not found.",
+            text: JSON.stringify({ error: policyDetails }, null, 2),
           },
         ],
       };
     }
-
-    return {
-      contents: [
-        {
-          uri: request.params.uri,
-          mimeType: resource.mimeType,
-          text: resource.text,
-        },
-      ],
-    };
   });
 }
 
 function registerPromptHandlers(server: Server): void {
   server.setRequestHandler(ListPromptsRequestSchema, () => ({
     prompts: SOVEREIGN_MCP_PROMPTS.map((prompt) => ({
+      ...(() => {
+        assertAllowedPrompt(prompt.name);
+        assertPromptBudget(prompt.name, prompt.text);
+        return {};
+      })(),
       name: prompt.name,
       title: prompt.title,
       description: prompt.description,
@@ -226,35 +300,62 @@ function registerPromptHandlers(server: Server): void {
   }));
 
   server.setRequestHandler(GetPromptRequestSchema, (request) => {
-    const prompt = SOVEREIGN_MCP_PROMPTS.find((item) => item.name === request.params.name);
+    try {
+      assertAllowedPrompt(request.params.name);
+      const prompt = SOVEREIGN_MCP_PROMPTS.find((item) => item.name === request.params.name);
 
-    if (!prompt) {
+      if (!prompt) {
+        return {
+          description: "Prompt not found.",
+          messages: [
+            {
+              role: "user" as const,
+              content: {
+                type: "text" as const,
+                text: "The requested Sovereign Ops prompt was not found.",
+              },
+            },
+          ],
+        };
+      }
+
+      assertPromptBudget(prompt.name, prompt.text);
+
       return {
-        description: "Prompt not found.",
+        description: prompt.description,
         messages: [
           {
             role: "user" as const,
             content: {
               type: "text" as const,
-              text: "The requested Sovereign Ops prompt was not found.",
+              text: prompt.text,
+            },
+          },
+        ],
+      };
+    } catch (error) {
+      const policyDetails =
+        error instanceof McpPolicyError
+          ? error.toJSON()
+          : {
+              code: "MCP_PROMPT_NOT_ALLOWED",
+              message: "MCP prompt request failed policy validation.",
+              policyArea: "prompt",
+            };
+
+      return {
+        description: "Prompt blocked by MCP policy.",
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: JSON.stringify({ error: policyDetails }, null, 2),
             },
           },
         ],
       };
     }
-
-    return {
-      description: prompt.description,
-      messages: [
-        {
-          role: "user" as const,
-          content: {
-            type: "text" as const,
-            text: prompt.text,
-          },
-        },
-      ],
-    };
   });
 }
 

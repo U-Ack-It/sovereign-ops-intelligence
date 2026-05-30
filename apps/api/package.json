@@ -12,6 +12,7 @@
     "guard": "node scripts/bug-guardian.mjs",
     "guardian": "node scripts/guardian.mjs",
     "mcp:check": "node scripts/check-mcp-manifest.mjs",
+    "mcp:policy:check": "node scripts/check-mcp-policy.mjs",
     "mcp:stdio": "node dist/mcp/server.js",
     "smoke": "npm run build && node scripts/smoke-route.mjs",
     "smoke:production": "node scripts/smoke-production-start.mjs",

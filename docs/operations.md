@@ -24,9 +24,19 @@ Run the manifest guard with:
 
 ```sh
 npm --prefix apps/api run mcp:check
+npm --prefix apps/api run mcp:policy:check
 ```
 
 The bridge exposes safe advisor routing and dry-run execution tools plus selected read-only docs resources. It does not expose internal visibility endpoints. Do not commit MCP client configuration containing credentials.
+
+MCP policy limits:
+
+- Input text: 2,000 characters
+- Skill id: 120 characters
+- Tool calls per session: 20
+- Tool calls per minute: 10
+- Resource reads: 20,000 characters
+- Prompt text: 4,000 characters
 
 ## Production Verification
 
