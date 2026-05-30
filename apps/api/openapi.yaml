@@ -1,0 +1,732 @@
+openapi: 3.1.0
+info:
+  title: Sovereign Ops Advisor API
+  version: 0.1.0
+  description: Deterministic advisor routing, dry-run skill execution, audit visibility, dashboard summaries, and operational metrics for Sovereign Ops Intelligence.
+servers:
+  - url: http://localhost:3000
+    description: Local development
+tags:
+  - name: Health
+  - name: Advisors
+  - name: Admin Visibility
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-admin-api-key
+  headers:
+    RequestId:
+      description: Correlation request ID. Mirrors an incoming x-request-id or a generated value.
+      schema:
+        type: string
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - requestId
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            requestId:
+              type: string
+    SkillDefinition:
+      type: object
+      required:
+        - id
+        - name
+        - advisor
+        - category
+        - description
+        - inputHints
+        - outputType
+        - riskLevel
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        advisor:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        inputHints:
+          type: array
+          items:
+            type: string
+        outputType:
+          type: string
+        riskLevel:
+          type: string
+    AdvisorPlanStep:
+      type: object
+      required:
+        - id
+        - advisor
+        - skillId
+        - title
+        - description
+        - priority
+        - requiresHumanApproval
+        - expectedOutput
+        - action
+      properties:
+        id:
+          type: string
+        advisor:
+          type: string
+        skillId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high]
+        requiresHumanApproval:
+          type: boolean
+        expectedOutput:
+          type: string
+        action:
+          type: string
+    AdvisorPlan:
+      type: object
+      required:
+        - advisor
+        - category
+        - confidence
+        - summary
+        - steps
+        - safeguards
+        - missingInputs
+      properties:
+        advisor:
+          type: string
+        category:
+          type: string
+        confidence:
+          type: string
+          enum: [low, medium, high]
+        summary:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdvisorPlanStep"
+        safeguards:
+          type: array
+          items:
+            type: string
+        missingInputs:
+          type: array
+          items:
+            type: string
+    ActionPlanStep:
+      type: object
+      required:
+        - id
+        - skillId
+        - title
+        - objective
+        - requiredInputs
+        - expectedOutput
+        - requiresApproval
+      properties:
+        id:
+          type: string
+        skillId:
+          type: string
+        title:
+          type: string
+        objective:
+          type: string
+        requiredInputs:
+          type: array
+          items:
+            type: string
+        expectedOutput:
+          type: string
+        requiresApproval:
+          type: boolean
+    ActionPlan:
+      type: object
+      required:
+        - advisor
+        - category
+        - summary
+        - steps
+        - escalation
+      properties:
+        advisor:
+          type: string
+        category:
+          type: string
+        summary:
+          type: string
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActionPlanStep"
+        escalation:
+          type:
+            - string
+            - "null"
+    RouteRequest:
+      type: object
+      properties:
+        message:
+          type: string
+        query:
+          type: string
+      oneOf:
+        - required: [message]
+        - required: [query]
+    RouteResponse:
+      type: object
+      required:
+        - advisor
+        - category
+        - confidence
+        - matchedKeywords
+        - reason
+        - nextAction
+        - skills
+        - plan
+        - actionPlan
+        - requestId
+      properties:
+        advisor:
+          type: string
+        category:
+          type: string
+        confidence:
+          type: string
+          enum: [low, medium, high]
+        matchedKeywords:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+        nextAction:
+          type: string
+        skills:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillDefinition"
+        plan:
+          $ref: "#/components/schemas/AdvisorPlan"
+        actionPlan:
+          $ref: "#/components/schemas/ActionPlan"
+        requestId:
+          type: string
+    ExecuteRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+        context:
+          type: object
+          additionalProperties: true
+    DryRunExecution:
+      type: object
+      required:
+        - mode
+        - advisor
+        - category
+        - skillId
+        - skillName
+        - risk
+        - approval
+        - summary
+        - steps
+        - expectedOutputs
+        - blockedActions
+        - audit
+      properties:
+        mode:
+          type: string
+          enum: [dry_run]
+        advisor:
+          type: string
+        category:
+          type: string
+        skillId:
+          type: string
+        skillName:
+          type: string
+        risk:
+          type: string
+          enum: [low, medium, high]
+        approval:
+          type: string
+          enum: [not_required, recommended, required]
+        summary:
+          type: string
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        expectedOutputs:
+          type: array
+          items:
+            type: string
+        blockedActions:
+          type: array
+          items:
+            type: string
+        audit:
+          type: object
+          additionalProperties: true
+    ExecuteResponse:
+      type: object
+      required:
+        - requestId
+        - route
+        - execution
+      properties:
+        requestId:
+          type: string
+        route:
+          $ref: "#/components/schemas/RouteResponse"
+        execution:
+          $ref: "#/components/schemas/DryRunExecution"
+    SkillExecuteRequest:
+      type: object
+      required:
+        - skillId
+      properties:
+        skillId:
+          type: string
+        context:
+          type: object
+          additionalProperties: true
+    SkillExecutionResponse:
+      type: object
+      required:
+        - skillId
+        - advisor
+        - status
+        - summary
+        - requiredInputs
+        - missingInputs
+        - recommendedSteps
+        - riskFlags
+        - handoffNotes
+        - requestId
+      properties:
+        skillId:
+          type: string
+        advisor:
+          type: string
+        status:
+          type: string
+          enum: [completed, needs_input, not_found]
+        summary:
+          type: string
+        requiredInputs:
+          type: array
+          items:
+            type: string
+        missingInputs:
+          type: array
+          items:
+            type: string
+        recommendedSteps:
+          type: array
+          items:
+            type: string
+        riskFlags:
+          type: array
+          items:
+            type: string
+        handoffNotes:
+          type: string
+        requestId:
+          type: string
+    AuditEvent:
+      type: object
+      required:
+        - id
+        - requestId
+        - timestamp
+        - method
+        - route
+        - eventType
+        - status
+      properties:
+        id:
+          type: string
+        requestId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        method:
+          type: string
+        route:
+          type: string
+        eventType:
+          type: string
+          enum: [advisor.route, advisor.execute, skill.execute, api.error]
+        status:
+          type: string
+          enum: [success, error]
+        advisor:
+          type: string
+        inputSummary:
+          type: string
+          description: Truncated safe input summary, not full raw request input.
+        selectedSkillIds:
+          type: array
+          items:
+            type: string
+        planStepCount:
+          type: integer
+        actionPlanStepCount:
+          type: integer
+        errorCode:
+          type: string
+    AuditResponse:
+      type: object
+      required:
+        - events
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+    DashboardResponse:
+      type: object
+      required:
+        - dashboard
+      properties:
+        dashboard:
+          type: object
+          required:
+            - status
+            - generatedAt
+            - advisors
+            - audit
+          properties:
+            status:
+              type: string
+              enum: [ok]
+            generatedAt:
+              type: string
+              format: date-time
+            advisors:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            audit:
+              type: object
+              additionalProperties: true
+    MetricsResponse:
+      type: object
+      required:
+        - metrics
+      properties:
+        metrics:
+          type: object
+          required:
+            - generatedAt
+            - process
+            - http
+            - audit
+            - telemetry
+            - export
+          properties:
+            generatedAt:
+              type: string
+              format: date-time
+            process:
+              type: object
+              additionalProperties: true
+            http:
+              type: object
+              additionalProperties: true
+            audit:
+              type: object
+              additionalProperties: true
+            telemetry:
+              type: object
+              additionalProperties: true
+            export:
+              type: object
+              description: Safe export status; endpoint values and headers are not returned.
+              additionalProperties: true
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health
+      responses:
+        "200":
+          description: Service is healthy.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, version, timestamp]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  service:
+                    type: string
+                  version:
+                    type:
+                      - string
+                      - "null"
+                  timestamp:
+                    type: string
+                    format: date-time
+  /ready:
+    get:
+      tags: [Health]
+      summary: Service readiness
+      responses:
+        "200":
+          description: Service is ready.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+                  service:
+                    type: string
+  /version:
+    get:
+      tags: [Health]
+      summary: Package version and runtime environment
+      responses:
+        "200":
+          description: Version metadata.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, version, nodeEnv]
+                properties:
+                  name:
+                    type:
+                      - string
+                      - "null"
+                  version:
+                    type:
+                      - string
+                      - "null"
+                  nodeEnv:
+                    type: string
+  /agents/route:
+    post:
+      tags: [Advisors]
+      summary: Route a request to an advisor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RouteRequest"
+      responses:
+        "200":
+          description: Advisor route result.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RouteResponse"
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/execute:
+    post:
+      tags: [Advisors]
+      summary: Route a request and dry-run execute the first selected skill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecuteRequest"
+      responses:
+        "200":
+          description: Route and dry-run execution result.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecuteResponse"
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/skills/execute:
+    post:
+      tags: [Advisors]
+      summary: Dry-run execute a selected skill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SkillExecuteRequest"
+      responses:
+        "200":
+          description: Skill dry-run execution result.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillExecutionResponse"
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/audit:
+    get:
+      tags: [Admin Visibility]
+      summary: In-memory advisor/API audit events
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 100
+      responses:
+        "200":
+          description: Recent audit events. Events are in-memory and not durable.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditResponse"
+        "401":
+          description: Admin API key required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin API key invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/dashboard:
+    get:
+      tags: [Admin Visibility]
+      summary: Advisor dashboard summary
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 25
+      responses:
+        "200":
+          description: In-memory advisor dashboard and audit stats.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardResponse"
+        "401":
+          description: Admin API key required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin API key invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/metrics:
+    get:
+      tags: [Admin Visibility]
+      summary: Operational metrics and telemetry summary
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: In-memory metrics. Endpoint values and OTLP headers are not returned.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+        "401":
+          description: Admin API key required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin API key invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"

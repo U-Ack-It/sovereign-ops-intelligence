@@ -117,6 +117,27 @@ Sovereign Ops API -> OpenTelemetry Collector -> telemetry backend
 
 The OpenTelemetry Collector can receive, process, redact, sample, and export telemetry to a backend. Langfuse can be used as one OTLP-compatible backend when configured with its endpoint and authorization headers, but the API adapter remains generic and does not depend on Langfuse-specific code.
 
+## Developer Portal Metadata
+
+Backstage and TechDocs metadata live at the repository root:
+
+- `catalog-info.yaml` - Backstage System, Component, and API entities.
+- `mkdocs.yml` - TechDocs site navigation.
+- `docs/` - TechDocs source pages.
+- `apps/api/openapi.yaml` - OpenAPI contract referenced by Backstage.
+
+Run the metadata guard from the repository root:
+
+```sh
+npm --prefix apps/api run docs:check
+```
+
+Or from `apps/api`:
+
+```sh
+npm run docs:check
+```
+
 ## Notes
 
 - Advisor execution is dry-run and does not call external systems.

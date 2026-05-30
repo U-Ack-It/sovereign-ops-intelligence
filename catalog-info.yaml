@@ -1,0 +1,40 @@
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: sovereign-ops-intelligence
+  description: Local-first operations intelligence platform for advisor routing, dry-run execution, audit visibility, and operational observability.
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+spec:
+  owner: platform-owner
+  lifecycle: experimental
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: sovereign-ops-api
+  description: TypeScript API service for deterministic advisor routing, skill execution planning, admin visibility, and OTLP-ready observability.
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+spec:
+  type: service
+  owner: platform-owner
+  lifecycle: experimental
+  system: sovereign-ops-intelligence
+  providesApis:
+    - sovereign-ops-advisor-api
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: sovereign-ops-advisor-api
+  description: OpenAPI contract for the Sovereign Ops advisor routing and dry-run execution API.
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+spec:
+  type: openapi
+  owner: platform-owner
+  lifecycle: experimental
+  system: sovereign-ops-intelligence
+  definition:
+    $text: ./apps/api/openapi.yaml

@@ -1,0 +1,8 @@
+site_name: Sovereign Ops Intelligence
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - API: api.md
+  - Operations: operations.md
+plugins:
+  - techdocs-core
