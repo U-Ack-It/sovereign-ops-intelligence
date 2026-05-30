@@ -1,11 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  validateMcpManifestIntegrity,
+  validateMcpManifestSnapshot,
+} from "./check-mcp-manifest-integrity.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const apiDir = path.resolve(__dirname, "..");
 const manifestPath = path.join(apiDir, "src/mcp/manifest.ts");
+const compiledManifestPath = path.join(apiDir, "dist/mcp/manifest.js");
+const snapshotPath = path.join(apiDir, "src/mcp/manifest.snapshot.json");
 
 const expectedTools = [
   "sovereign_advisor_route",
@@ -66,6 +72,23 @@ if (!existsSync(manifestPath)) {
     if (lowerManifest.includes(term.toLowerCase())) {
       failures.push(`Forbidden MCP manifest term found: ${term}`);
     }
+  }
+}
+
+if (existsSync(compiledManifestPath) && existsSync(snapshotPath)) {
+  const compiledManifest = await import(`file://${compiledManifestPath}?t=${Date.now()}`);
+  const integrityResult = validateMcpManifestIntegrity({
+    tools: compiledManifest.SOVEREIGN_MCP_TOOLS,
+    resources: compiledManifest.SOVEREIGN_MCP_RESOURCES,
+    prompts: compiledManifest.SOVEREIGN_MCP_PROMPTS,
+  });
+  const expectedSnapshot = JSON.parse(readFileSync(snapshotPath, "utf8"));
+  const snapshotResult = validateMcpManifestSnapshot(integrityResult.snapshot, expectedSnapshot);
+
+  failures.push(...integrityResult.failures);
+
+  if (!snapshotResult.passed) {
+    failures.push(snapshotResult.message);
   }
 }
 

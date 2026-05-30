@@ -239,8 +239,10 @@ The integrity check compares the current deterministic manifest output with `app
 To update the snapshot after an approved contract change:
 
 ```sh
-npm run mcp:manifest:update
+npm run mcp:manifest:update-snapshot
 ```
+
+`mcp:manifest:update` is kept as a compatibility alias, but the explicit governance command is `mcp:manifest:update-snapshot`. Sentinel never runs the update command automatically.
 
 ## Notes
 

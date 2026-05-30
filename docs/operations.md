@@ -26,7 +26,7 @@ Run the manifest guard with:
 npm --prefix apps/api run mcp:check
 npm --prefix apps/api run mcp:policy:check
 npm --prefix apps/api run mcp:manifest:check
-npm --prefix apps/api run mcp:manifest:update
+npm --prefix apps/api run mcp:manifest:update-snapshot
 npm --prefix apps/api run verify:mcp
 ```
 
@@ -43,7 +43,7 @@ MCP policy limits:
 
 MCP manifest integrity rules require every tool to use a strict object schema with declared properties and `additionalProperties: false`. New tool descriptors must avoid hidden instructions, policy-bypass wording, admin endpoint exposure, and secret references. Run `verify:mcp` before trusting a manifest change.
 
-Use `mcp:manifest:update` only after the changed MCP contract has been reviewed and accepted.
+Use `mcp:manifest:update-snapshot` only after the changed MCP contract has been reviewed and accepted. Sentinel does not run this command automatically.
 
 ## Production Verification
 

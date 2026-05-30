@@ -1,3 +1,12 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const apiDir = path.resolve(__dirname, "..");
+const snapshotPath = path.join(apiDir, "src/mcp/manifest.snapshot.json");
+
 const suspiciousDescriptorTerms = [
   "ignore previous instructions",
   "system prompt",
@@ -9,6 +18,11 @@ const suspiciousDescriptorTerms = [
   "private key",
   "bypass",
   "override policy",
+  "raw input",
+  "raw request",
+  "request body",
+  "headers",
+  "authorization",
 ];
 
 const forbiddenToolSurfaceTerms = [
@@ -18,6 +32,9 @@ const forbiddenToolSurfaceTerms = [
   "x-admin-api-key",
   "SOVEREIGN_ADMIN_API_KEY",
   "OTEL_EXPORTER_OTLP_HEADERS",
+  "raw input",
+  "request body",
+  "authorization",
 ];
 
 function normalizeText(value) {
@@ -222,11 +239,3 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   });
 }
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const apiDir = path.resolve(__dirname, "..");
-const snapshotPath = path.join(apiDir, "src/mcp/manifest.snapshot.json");

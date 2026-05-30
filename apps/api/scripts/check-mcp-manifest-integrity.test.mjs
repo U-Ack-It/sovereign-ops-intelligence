@@ -1,10 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { BUG_SENTINEL_CHECKS } from "./bug-sentinel-lib.mjs";
 import {
   createDeterministicManifestSnapshot,
   validateMcpManifestIntegrity,
   validateMcpManifestSnapshot,
 } from "./check-mcp-manifest-integrity.mjs";
+import {
+  buildMcpManifestSnapshot,
+  writeMcpManifestSnapshot,
+} from "./update-mcp-manifest-snapshot.mjs";
 
 function validTool(overrides = {}) {
   return {
@@ -136,6 +144,62 @@ test("MCP manifest snapshot validation detects drift", () => {
   assert.equal(matching.passed, true);
   assert.equal(drifted.passed, false);
   assert.match(drifted.message, /snapshot drift detected/);
+});
+
+test("MCP check result fails on manifest snapshot drift", () => {
+  const currentSnapshot = createDeterministicManifestSnapshot(validManifest());
+  const drifted = {
+    ...currentSnapshot,
+    tools: [validTool({ purpose: "Changed descriptor." })],
+  };
+
+  const result = validateMcpManifestSnapshot(currentSnapshot, drifted);
+
+  assert.equal(result.passed, false);
+  assert.match(result.message, /snapshot drift detected/);
+});
+
+test("MCP snapshot update command helpers refresh snapshot content", () => {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "sovereign-mcp-snapshot-"));
+  const snapshotPath = path.join(tempDir, "manifest.snapshot.json");
+  const snapshot = buildMcpManifestSnapshot({
+    SOVEREIGN_MCP_TOOLS: [validTool()],
+    SOVEREIGN_MCP_RESOURCES: [],
+    SOVEREIGN_MCP_PROMPTS: [],
+  });
+
+  writeMcpManifestSnapshot(snapshot, snapshotPath);
+
+  assert.deepEqual(JSON.parse(readFileSync(snapshotPath, "utf8")), snapshot);
+});
+
+test("MCP snapshot output is stable across repeated writes", () => {
+  const tempDir = mkdtempSync(path.join(tmpdir(), "sovereign-mcp-stable-"));
+  const firstPath = path.join(tempDir, "first.json");
+  const secondPath = path.join(tempDir, "second.json");
+  const snapshot = buildMcpManifestSnapshot({
+    SOVEREIGN_MCP_TOOLS: [validTool({ name: "sovereign_skill_execute" }), validTool()],
+    SOVEREIGN_MCP_RESOURCES: [],
+    SOVEREIGN_MCP_PROMPTS: [],
+  });
+
+  writeMcpManifestSnapshot(snapshot, firstPath);
+  writeMcpManifestSnapshot(snapshot, secondPath);
+
+  assert.equal(readFileSync(firstPath, "utf8"), readFileSync(secondPath, "utf8"));
+});
+
+test("Bug Sentinel does not run the MCP snapshot update command automatically", () => {
+  const sentinelCommands = BUG_SENTINEL_CHECKS.map((check) => [check.command, ...check.args].join(" "));
+
+  assert.equal(
+    sentinelCommands.some((command) => command.includes("mcp:manifest:update-snapshot")),
+    false,
+  );
+  assert.equal(
+    sentinelCommands.some((command) => command.includes("update-mcp-manifest-snapshot")),
+    false,
+  );
 });
 
 test("MCP tool descriptors cannot expose internal admin-only surfaces", () => {
