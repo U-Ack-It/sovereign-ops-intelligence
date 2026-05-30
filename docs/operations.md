@@ -11,6 +11,23 @@ npm --prefix apps/api run sentinel
 npm --prefix apps/api run smoke:production
 ```
 
+## MCP Bridge
+
+The MCP bridge is a local stdio process for agent clients. It is not an HTTP listener and it is only active when launched explicitly.
+
+```sh
+npm --prefix apps/api run build
+npm --prefix apps/api run mcp:stdio
+```
+
+Run the manifest guard with:
+
+```sh
+npm --prefix apps/api run mcp:check
+```
+
+The bridge exposes safe advisor routing and dry-run execution tools plus selected read-only docs resources. It does not expose internal visibility endpoints. Do not commit MCP client configuration containing credentials.
+
 ## Production Verification
 
 ```sh

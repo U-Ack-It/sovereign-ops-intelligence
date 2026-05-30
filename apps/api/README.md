@@ -138,6 +138,50 @@ Or from `apps/api`:
 npm run docs:check
 ```
 
+## MCP Bridge
+
+The local MCP bridge lets agent clients discover safe Sovereign Ops advisor capabilities without reading the codebase. It uses stdio and is separate from the HTTP API server.
+
+Build first, then run:
+
+```sh
+npm run build
+npm run mcp:stdio
+```
+
+From the repository root:
+
+```sh
+npm --prefix apps/api run build
+npm --prefix apps/api run mcp:stdio
+```
+
+MCP tools:
+
+- `sovereign_advisor_route` - route an operator message to the best advisor.
+- `sovereign_advisor_execute` - create a safe dry-run advisor execution result.
+- `sovereign_skill_execute` - run one known advisor skill through the deterministic local skill executor.
+
+MCP resources:
+
+- `sovereign://openapi`
+- `sovereign://docs/architecture`
+- `sovereign://docs/api`
+
+MCP prompts:
+
+- `sovereign-operations-triage`
+- `sovereign-security-review`
+- `sovereign-compliance-review`
+
+The MCP bridge intentionally does not expose `/agents/audit`, `/agents/dashboard`, `/agents/metrics`, protected visibility data, environment values, or database resources. Do not commit MCP client configuration containing credentials.
+
+Validate the MCP catalog with:
+
+```sh
+npm run mcp:check
+```
+
 ## Notes
 
 - Advisor execution is dry-run and does not call external systems.
