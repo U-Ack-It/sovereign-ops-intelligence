@@ -12,6 +12,8 @@
     "guard": "node scripts/bug-guardian.mjs",
     "guardian": "node scripts/guardian.mjs",
     "mcp:check": "node scripts/check-mcp-manifest.mjs",
+    "mcp:manifest:check": "npm run build && node scripts/check-mcp-manifest-integrity.mjs",
+    "mcp:manifest:update": "npm run build && node scripts/update-mcp-manifest-snapshot.mjs",
     "mcp:policy:check": "node scripts/check-mcp-policy.mjs",
     "mcp:stdio": "node dist/mcp/server.js",
     "smoke": "npm run build && node scripts/smoke-route.mjs",
@@ -25,6 +27,7 @@
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run test:agents && npm run smoke",
     "verify:guardian": "npm run verify && npm run guardian",
+    "verify:mcp": "npm run mcp:check && npm run mcp:policy:check && npm run mcp:manifest:check",
     "verify:production": "npm run build && NODE_ENV=production npm run check:production && NODE_ENV=test SOVEREIGN_ADMIN_API_KEY= npm run sentinel && npm run smoke:production",
     "verify:sentinel": "npm run verify && npm run sentinel"
   },

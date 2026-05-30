@@ -182,6 +182,12 @@ Validate the MCP catalog with:
 npm run mcp:check
 ```
 
+Validate the full MCP manifest, policy, and schema contract with:
+
+```sh
+npm run verify:mcp
+```
+
 ## MCP Safety Policy
 
 The MCP bridge has an explicit local safety policy around tools, resources, prompts, input sizes, and tool-call budgets.
@@ -205,6 +211,35 @@ The policy blocks forbidden surfaces and sensitive text categories before execut
 
 ```sh
 npm run mcp:policy:check
+```
+
+## MCP Manifest Integrity
+
+MCP tool descriptors are part of the client-facing agent contract. Descriptor drift or vague schemas can cause tool poisoning, so every MCP tool must keep a stable name, a clear human-readable purpose, and a strict object input schema.
+
+Rules for adding a new MCP tool:
+
+- Add the tool to `apps/api/src/mcp/manifest.ts`.
+- Keep the tool name stable and deterministic.
+- Provide a clear title and purpose.
+- Use `inputSchema.type: "object"`.
+- Declare `properties` and make every required field exist in `properties`.
+- Set `additionalProperties: false`.
+- Avoid hidden instruction language such as prompts to bypass, override, exfiltrate, or reveal secrets.
+- Do not expose admin visibility endpoints, environment variables, credentials, or raw telemetry.
+
+Run the integrity check after any manifest change:
+
+```sh
+npm run mcp:manifest:check
+```
+
+The integrity check compares the current deterministic manifest output with `apps/api/src/mcp/manifest.snapshot.json`. Update that snapshot only when a tool, resource, prompt, or schema change is intentional and reviewed.
+
+To update the snapshot after an approved contract change:
+
+```sh
+npm run mcp:manifest:update
 ```
 
 ## Notes

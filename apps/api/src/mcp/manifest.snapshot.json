@@ -1,0 +1,107 @@
+{
+  "tools": [
+    {
+      "name": "sovereign_advisor_execute",
+      "title": "Sovereign Advisor Execute",
+      "purpose": "Create a safe dry-run advisor execution result for an operator message.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      }
+    },
+    {
+      "name": "sovereign_advisor_route",
+      "title": "Sovereign Advisor Route",
+      "purpose": "Route an operator message to the best Sovereign Ops advisor.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      }
+    },
+    {
+      "name": "sovereign_skill_execute",
+      "title": "Sovereign Skill Execute",
+      "purpose": "Run one known advisor skill through the deterministic local skill executor.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "skillId",
+          "input"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "skillId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "input": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "sovereign://docs/api",
+      "name": "sovereign-api-doc",
+      "title": "Sovereign Ops API Docs",
+      "description": "Read-only API usage notes for Sovereign Ops agent clients.",
+      "mimeType": "text/plain"
+    },
+    {
+      "uri": "sovereign://docs/architecture",
+      "name": "sovereign-architecture-doc",
+      "title": "Sovereign Ops Architecture",
+      "description": "Read-only architecture overview for the Sovereign Ops API.",
+      "mimeType": "text/plain"
+    },
+    {
+      "uri": "sovereign://openapi",
+      "name": "sovereign-openapi",
+      "title": "Sovereign Ops OpenAPI Contract",
+      "description": "Read-only OpenAPI contract for the Sovereign Ops Advisor API.",
+      "mimeType": "application/yaml"
+    }
+  ],
+  "prompts": [
+    {
+      "name": "sovereign-compliance-review",
+      "title": "Sovereign Compliance Review",
+      "description": "Guide a client through contract, privacy, and risk review."
+    },
+    {
+      "name": "sovereign-operations-triage",
+      "title": "Sovereign Operations Triage",
+      "description": "Guide a client through safe property operations triage."
+    },
+    {
+      "name": "sovereign-security-review",
+      "title": "Sovereign Security Review",
+      "description": "Guide a client through cautious access and security review."
+    }
+  ]
+}

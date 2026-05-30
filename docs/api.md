@@ -82,3 +82,19 @@ Budgets and limits:
 - Max prompt size: 4,000 characters
 
 Policy errors are structured with a code, message, policy area, and limit where relevant. Admin visibility endpoints are intentionally not exposed as MCP tools or resources.
+
+## MCP Manifest Integrity
+
+MCP tool descriptors are guarded as a client-facing contract. New tools must be added through `apps/api/src/mcp/manifest.ts` with stable names, clear descriptions, strict object schemas, declared properties, and `additionalProperties: false`.
+
+Every required field must exist in the schema properties. Tool and field descriptions must not contain hidden-instruction language, secret references, admin endpoint exposure, or policy-bypass wording.
+
+Run the MCP contract checks with:
+
+```sh
+npm --prefix apps/api run verify:mcp
+```
+
+This runs the manifest catalog check, policy check, and manifest integrity/schema hardening check.
+
+The integrity check compares the live deterministic manifest output against `apps/api/src/mcp/manifest.snapshot.json`. Snapshot updates should be reviewed as client-facing contract changes.

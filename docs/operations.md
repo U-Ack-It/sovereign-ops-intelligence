@@ -25,6 +25,9 @@ Run the manifest guard with:
 ```sh
 npm --prefix apps/api run mcp:check
 npm --prefix apps/api run mcp:policy:check
+npm --prefix apps/api run mcp:manifest:check
+npm --prefix apps/api run mcp:manifest:update
+npm --prefix apps/api run verify:mcp
 ```
 
 The bridge exposes safe advisor routing and dry-run execution tools plus selected read-only docs resources. It does not expose internal visibility endpoints. Do not commit MCP client configuration containing credentials.
@@ -37,6 +40,10 @@ MCP policy limits:
 - Tool calls per minute: 10
 - Resource reads: 20,000 characters
 - Prompt text: 4,000 characters
+
+MCP manifest integrity rules require every tool to use a strict object schema with declared properties and `additionalProperties: false`. New tool descriptors must avoid hidden instructions, policy-bypass wording, admin endpoint exposure, and secret references. Run `verify:mcp` before trusting a manifest change.
+
+Use `mcp:manifest:update` only after the changed MCP contract has been reviewed and accepted.
 
 ## Production Verification
 

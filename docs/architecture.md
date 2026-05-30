@@ -33,9 +33,12 @@ Local MCP client
 - Docker runtime: production build, `npm start`, graceful shutdown, and `/health` container check.
 - MCP stdio bridge: local-first bridge for agent clients to discover safe advisor tools, selected docs, and short operational prompts without starting the HTTP server.
 - MCP safety policy: allowlist, input-size limits, resource-size limits, forbidden text checks, and local tool-call budgets.
+- MCP manifest integrity: deterministic checks for stable tool names, strict schemas, hidden-instruction language, and forbidden admin/internal surfaces.
 
 ## In-Memory Limits
 
 Audit, dashboard, and metrics data are currently in-memory only. They reset when the process restarts and are not durable records. The audit trail and telemetry buffers are intentionally bounded for local operational visibility.
 
 The MCP bridge intentionally does not expose internal visibility endpoints, environment values, telemetry internals, or database resources. Its policy fails closed when a tool, resource, prompt, input, or returned content violates the configured boundaries.
+
+MCP manifest integrity checks prevent descriptor drift and tool poisoning by requiring stable sorted tool definitions, non-empty descriptions, object schemas, declared properties, and `additionalProperties: false`.
