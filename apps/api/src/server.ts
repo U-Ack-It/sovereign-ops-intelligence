@@ -3,6 +3,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { AddressInfo } from "node:net";
 import { pathToFileURL } from "node:url";
 
+import { evaluateActionPolicy, type ActionPolicyResult } from "./action-policy.js";
 import { verifyAdminRequest } from "./admin-auth.js";
 import { ApiAuditEventType, ApiAuditStatus, listApiAuditEvents, recordApiAuditEvent } from "./agents/audit-trail.js";
 import { buildAdvisorDashboardSummary } from "./agents/dashboard.js";
@@ -157,6 +158,7 @@ function safeRecordApiAuditEvent(input: {
   planStepCount?: number;
   actionPlanStepCount?: number;
   errorCode?: string;
+  actionPolicyDecision?: string;
 }): void {
   try {
     recordApiAuditEvent(input);
@@ -167,6 +169,7 @@ function safeRecordApiAuditEvent(input: {
       route: input.route,
       advisor: input.advisor,
       errorCode: input.errorCode,
+      actionPolicyDecision: input.actionPolicyDecision,
     });
   } catch {
     // Audit and telemetry recording must never block the API response path.
@@ -419,6 +422,38 @@ function sendError(
   );
 }
 
+function actionPolicyResponse(policy: ActionPolicyResult): { statusCode: number; error: ParsedError } | null {
+  if (policy.decision === "deny") {
+    return {
+      statusCode: 403,
+      error: {
+        code: "ACTION_POLICY_DENIED",
+        message: "Action policy denied this request.",
+        details: {
+          decision: policy.decision,
+          reason: policy.reason,
+        },
+      },
+    };
+  }
+
+  if (policy.decision === "requires_approval") {
+    return {
+      statusCode: 409,
+      error: {
+        code: "ACTION_REQUIRES_APPROVAL",
+        message: "Action requires explicit human approval before execution.",
+        details: {
+          decision: policy.decision,
+          reason: policy.reason,
+        },
+      },
+    };
+  }
+
+  return null;
+}
+
 function readBody(request: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -528,6 +563,21 @@ async function handleAgentsExecute(
     actorUserId: "api",
     actorRole: "OWNER",
   });
+  const policy = evaluateActionPolicy({
+    route: "/agents/execute",
+    message: parsed.body.message,
+    advisor: route.advisor,
+    category: route.category,
+    skillId: route.skills[0]?.id,
+    context: parsed.body.context,
+  });
+  const policyError = actionPolicyResponse(policy);
+
+  if (policyError) {
+    sendError(response, policyError.statusCode, policyError.error, requestId, auditContext);
+    return;
+  }
+
   const execution = executeFirstSkillForRoute(route, {
     message: parsed.body.message,
     context: parsed.body.context,
@@ -543,9 +593,10 @@ async function handleAgentsExecute(
     inputSummary: parsed.body.message,
     selectedSkillIds: [execution.skillId],
     planStepCount: execution.steps.length,
+    actionPolicyDecision: policy.decision,
   });
 
-  sendJson(response, 200, { requestId, route, execution }, requestId);
+  sendJson(response, 200, { requestId, route, execution, actionPolicy: policy }, requestId);
 }
 
 async function handleAgentsSkillExecute(
@@ -565,6 +616,18 @@ async function handleAgentsSkillExecute(
     return;
   }
 
+  const policy = evaluateActionPolicy({
+    route: "/agents/skills/execute",
+    skillId: parsed.body.skillId,
+    context: parsed.body.context,
+  });
+  const policyError = actionPolicyResponse(policy);
+
+  if (policyError) {
+    sendError(response, policyError.statusCode, policyError.error, requestId, auditContext);
+    return;
+  }
+
   const execution = executeSkill(parsed.body.skillId, parsed.body.context);
   safeRecordApiAuditEvent({
     requestId,
@@ -575,9 +638,10 @@ async function handleAgentsSkillExecute(
     advisor: execution.advisor,
     inputSummary: parsed.body.context.message,
     selectedSkillIds: [execution.skillId],
+    actionPolicyDecision: policy.decision,
   });
 
-  sendJson(response, 200, { ...execution, requestId }, requestId);
+  sendJson(response, 200, { ...execution, requestId, actionPolicy: policy }, requestId);
 }
 
 export const server = createServer(async (request, response) => {

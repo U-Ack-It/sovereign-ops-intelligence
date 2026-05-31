@@ -284,13 +284,27 @@ async function assertInvalidRouteCase(name, response, expectedCode) {
   assert(parsed.error.details, `${name}: expected error details`);
 }
 
-function assertSkillExecutionResponse(caseName, response, expectedSkillId) {
+function assertSkillExecutionResponse(caseName, response, expectedSkillId, options = {}) {
+  const parsed = JSON.parse(response.body);
+
+  if (options.expectsApproval) {
+    assert(
+      response.statusCode === 409,
+      `${caseName}: expected approval-required HTTP 409, got ${response.statusCode}`,
+    );
+    assert(parsed.error, `${caseName}: expected approval error body`);
+    assert(
+      parsed.error.code === "ACTION_REQUIRES_APPROVAL",
+      `${caseName}: expected ACTION_REQUIRES_APPROVAL, got ${parsed.error.code}`,
+    );
+    assert(parsed.error.requestId, `${caseName}: expected approval error requestId`);
+    return;
+  }
+
   assert(
     response.statusCode === 200,
     `${caseName}: expected skill execution HTTP 200, got ${response.statusCode}`,
   );
-
-  const parsed = JSON.parse(response.body);
 
   assert(parsed.skillId, `${caseName}: expected skill execution skillId`);
   assert(
@@ -304,6 +318,11 @@ function assertSkillExecutionResponse(caseName, response, expectedSkillId) {
   assert(
     Array.isArray(parsed.recommendedSteps),
     `${caseName}: expected skill execution recommendedSteps array`,
+  );
+  assert(parsed.actionPolicy, `${caseName}: expected actionPolicy in skill execution`);
+  assert(
+    ["allow", "audit_only"].includes(parsed.actionPolicy.decision),
+    `${caseName}: expected safe action policy decision, got ${parsed.actionPolicy.decision}`,
   );
 }
 
@@ -431,7 +450,9 @@ try {
       },
     });
 
-    assertSkillExecutionResponse(smokeCase.name, skillResponse, firstSkill.id);
+    assertSkillExecutionResponse(smokeCase.name, skillResponse, firstSkill.id, {
+      expectsApproval: ["Security Advisor", "Compliance Advisor"].includes(routeResult.advisor),
+    });
     console.log(`PASS ${smokeCase.name}`);
   }
 

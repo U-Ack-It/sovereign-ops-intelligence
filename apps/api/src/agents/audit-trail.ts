@@ -20,6 +20,7 @@ export type ApiAuditEvent = {
   planStepCount?: number;
   actionPlanStepCount?: number;
   errorCode?: string;
+  actionPolicyDecision?: string;
 };
 
 type ApiAuditEventInput = {
@@ -34,6 +35,7 @@ type ApiAuditEventInput = {
   planStepCount?: number;
   actionPlanStepCount?: number;
   errorCode?: string;
+  actionPolicyDecision?: string;
 };
 
 type ListApiAuditEventsOptions = {
@@ -85,6 +87,7 @@ export function recordApiAuditEvent(input: ApiAuditEventInput): ApiAuditEvent {
     planStepCount: input.planStepCount,
     actionPlanStepCount: input.actionPlanStepCount,
     errorCode: input.errorCode,
+    actionPolicyDecision: input.actionPolicyDecision,
   };
 
   events.unshift(event);

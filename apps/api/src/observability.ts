@@ -17,6 +17,7 @@ export type ApiTelemetryEvent = {
   advisor?: string;
   durationMs?: number;
   errorCode?: string;
+  actionPolicyDecision?: string;
 };
 
 export type ApiTelemetrySink = (event: ApiTelemetryEvent) => void;
@@ -75,6 +76,7 @@ type TelemetryEventInput = {
   advisor?: string;
   durationMs?: number;
   errorCode?: string;
+  actionPolicyDecision?: string;
 };
 
 const MAX_RETAINED_TELEMETRY_EVENTS = 100;
@@ -119,6 +121,7 @@ export function recordTelemetryEvent(input: TelemetryEventInput): void {
     advisor: input.advisor,
     durationMs: normalizeDurationMs(input.durationMs),
     errorCode: input.errorCode,
+    actionPolicyDecision: input.actionPolicyDecision,
   };
 
   telemetryEvents.unshift(event);
