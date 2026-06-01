@@ -4,6 +4,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { clearApiAuditEvents, listApiAuditEvents } from "./agents/audit-trail.js";
+import { clearApprovalRecords, listApprovalRecords } from "./approvals.js";
 import { recordTelemetryEvent, registerTelemetrySink, resetApiMetrics } from "./observability.js";
 import { parseRouteRequestBody, server } from "./server.js";
 
@@ -294,8 +295,30 @@ function assertDryRunExecutionPlanShape(value: unknown): void {
   }
 }
 
-function assertActionPolicyShape(value: unknown, expectedDecision?: string): void {
-  assertJsonObject(value, "actionPolicy");
+function assertApprovalRecordShape(value: unknown): void {
+  assertJsonObject(value, "approval");
+  assertString(value.id, "approval.id");
+  assertString(value.requestId, "approval.requestId");
+  assertString(value.createdAt, "approval.createdAt");
+  assert.equal(value.status, "pending");
+  assertString(value.method, "approval.method");
+  assert.ok(["/agents/execute", "/agents/skills/execute"].includes(String(value.route)));
+  assert.equal(value.policyDecision, "requires_approval");
+  assertString(value.policyReason, "approval.policyReason");
+  assertStringArray(value.matchedTerms, "approval.matchedTerms");
+  assert.equal(typeof value.inputLength, "number");
+  assertString(value.inputDigest, "approval.inputDigest");
+  assert.match(String(value.inputDigest), /^[a-f0-9]{64}$/);
+  assertStringArray(value.contextKeys, "approval.contextKeys");
+  assertString(value.contextDigest, "approval.contextDigest");
+  assert.match(String(value.contextDigest), /^[a-f0-9]{64}$/);
+
+  if ("selectedSkillIds" in value) {
+    assertStringArray(value.selectedSkillIds, "approval.selectedSkillIds");
+  }
+}
+
+function assertActionPolicyShape(value: unknown, expectedDecision?: string): void {  assertJsonObject(value, "actionPolicy");
   assert.ok(
     ["allow", "deny", "requires_approval", "audit_only"].includes(String(value.decision)),
     "actionPolicy.decision should be a known decision",
@@ -761,18 +784,23 @@ test("action policy denies unsafe agent execution requests", async () => {
   }
 });
 
-test("action policy blocks approval-required agent execution before running", async () => {
+test("action policy creates approval records without executing approval-required actions", async () => {
+  clearApiAuditEvents();
+  clearApprovalRecords();
   const port = await listenForTest();
 
   try {
+    const sensitiveMessage = "Review password access for the gate system and reset password alpha-token.";
     const response = await requestJson(
       port,
       "POST",
       "/agents/execute",
       JSON.stringify({
-        message: "Grant access to the contractor for the property gate.",
+        message: sensitiveMessage,
         context: {
           property: "Miami residence",
+          password: "do-not-store",
+          urgency: "medium",
         },
       }),
       { requestId: "policy-approval-request" },
@@ -783,11 +811,98 @@ test("action policy blocks approval-required agent execution before running", as
     assertJsonObject(body.error, "policy approval error");
     assertJsonObject(body.error.details, "policy approval details");
     assert.equal(body.error.details.decision, "requires_approval");
+    assertJsonObject(body.error.details.approval, "policy approval details.approval");
+    assertString(body.error.details.approval.id, "approval response id");
+    assert.equal(body.error.details.approval.status, "pending");
+
+    const approvals = listApprovalRecords({ limit: 10 });
+    assert.equal(approvals.length, 1);
+    assertApprovalRecordShape(approvals[0]);
+    assert.equal(approvals[0].requestId, "policy-approval-request");
+    assert.equal(approvals[0].route, "/agents/execute");
+    assert.equal(approvals[0].advisor, "Security Advisor");
+    assert.ok(!approvals[0].contextKeys.includes("password"));
+
+    const auditEvents = listApiAuditEvents({ limit: 10 });
+    assert.equal(auditEvents.length, 1);
+    assert.equal(auditEvents[0].eventType, "api.error");
+    assert.equal(auditEvents[0].errorCode, "ACTION_REQUIRES_APPROVAL");
+    assert.ok(!auditEvents.some((event) => event.eventType === "advisor.execute"));
+
+    const serializedApproval = JSON.stringify(approvals[0]);
+    assert.ok(!serializedApproval.includes(sensitiveMessage));
+    assert.ok(!serializedApproval.includes("alpha-token"));
+    assert.ok(!serializedApproval.includes("do-not-store"));
   } finally {
     await closeServer();
+    clearApiAuditEvents();
+    clearApprovalRecords();
   }
 });
 
+test("approvals endpoint returns pending approval records by list and id", async () => {
+  clearApprovalRecords();
+  const port = await listenForTest();
+
+  try {
+    const approvalResponse = await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "access_review",
+        context: {
+          message: "Review gate access for the property team.",
+          authorization: "do-not-store",
+        },
+      }),
+      { requestId: "approval-skill-request" },
+    );
+
+    assertStructuredError(approvalResponse, 409, "ACTION_REQUIRES_APPROVAL", "approval-skill-request");
+    const approvalBody = JSON.parse(approvalResponse.body) as Record<string, unknown>;
+    assertJsonObject(approvalBody.error, "approval error");
+    assertJsonObject(approvalBody.error.details, "approval error details");
+    assertJsonObject(approvalBody.error.details.approval, "approval details.approval");
+    const approvalId = String(approvalBody.error.details.approval.id);
+
+    const listResponse = await requestJson(port, "GET", "/agents/approvals?limit=1", undefined, {
+      requestId: "approval-list-request",
+    });
+    assert.equal(listResponse.statusCode, 200);
+    assertJsonResponse(listResponse);
+    assertRequestIdHeader(listResponse, "approval-list-request");
+    const listBody = JSON.parse(listResponse.body) as Record<string, unknown>;
+    assert.ok(Array.isArray(listBody.approvals));
+    assert.equal(listBody.approvals.length, 1);
+    assertApprovalRecordShape(listBody.approvals[0]);
+    assertJsonObject(listBody.approvals[0], "listed approval");
+    assert.equal(listBody.approvals[0].id, approvalId);
+
+    const detailResponse = await requestJson(port, "GET", `/agents/approvals/${approvalId}`, undefined, {
+      requestId: "approval-detail-request",
+    });
+    assert.equal(detailResponse.statusCode, 200);
+    assertJsonResponse(detailResponse);
+    assertRequestIdHeader(detailResponse, "approval-detail-request");
+    const detailBody = JSON.parse(detailResponse.body) as Record<string, unknown>;
+    assertApprovalRecordShape(detailBody.approval);
+    assertJsonObject(detailBody.approval, "approval detail");
+    assert.equal(detailBody.approval.id, approvalId);
+
+    const missingResponse = await requestJson(port, "GET", "/agents/approvals/missing", undefined, {
+      requestId: "approval-missing-request",
+    });
+    assertStructuredError(missingResponse, 404, "APPROVAL_NOT_FOUND", "approval-missing-request");
+
+    const serialized = `${listResponse.body} ${detailResponse.body}`;
+    assert.ok(!serialized.includes("do-not-store"));
+    assert.ok(!serialized.includes("Review gate access for the property team."));
+  } finally {
+    await closeServer();
+    clearApprovalRecords();
+  }
+});
 test("action policy allows safe generic skill execution", async () => {
   const port = await listenForTest();
 

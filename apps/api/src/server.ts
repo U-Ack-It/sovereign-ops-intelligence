@@ -4,6 +4,7 @@ import { AddressInfo } from "node:net";
 import { pathToFileURL } from "node:url";
 
 import { evaluateActionPolicy, type ActionPolicyResult } from "./action-policy.js";
+import { createApprovalRecord, getApprovalRecord, listApprovalRecords } from "./approvals.js";
 import { verifyAdminRequest } from "./admin-auth.js";
 import { ApiAuditEventType, ApiAuditStatus, listApiAuditEvents, recordApiAuditEvent } from "./agents/audit-trail.js";
 import { buildAdvisorDashboardSummary } from "./agents/dashboard.js";
@@ -123,15 +124,20 @@ function metricRouteLabel(url: string | undefined): string {
     "/agents/audit",
     "/agents/dashboard",
     "/agents/metrics",
+    "/agents/approvals",
     "/agents/route",
     "/agents/execute",
     "/agents/skills/execute",
   ]);
 
+  if (path.startsWith("/agents/approvals/")) {
+    return "/agents/approvals";
+  }
+
   return knownMetricRoutes.has(path) ? path : "unknown";
 }
 
-function auditLimitFromUrl(url: string | undefined): number {
+function limitFromUrl(url: string | undefined): number {
   try {
     const parsed = new URL(url ?? "/", "http://local");
     const rawLimit = parsed.searchParams.get("limit");
@@ -422,6 +428,30 @@ function sendError(
   );
 }
 
+function approvalIdFromPath(path: string): string | null {
+  const prefix = "/agents/approvals/";
+
+  if (!path.startsWith(prefix)) {
+    return null;
+  }
+
+  const id = path.slice(prefix.length).trim();
+  return id || null;
+}
+
+function approvalResponseDetails(approval: ReturnType<typeof createApprovalRecord>): Record<string, unknown> {
+  return {
+    id: approval.id,
+    status: approval.status,
+    createdAt: approval.createdAt,
+    route: approval.route,
+    advisor: approval.advisor,
+    category: approval.category,
+    skillId: approval.skillId,
+    selectedSkillIds: approval.selectedSkillIds,
+  };
+}
+
 function actionPolicyResponse(policy: ActionPolicyResult): { statusCode: number; error: ParsedError } | null {
   if (policy.decision === "deny") {
     return {
@@ -429,20 +459,6 @@ function actionPolicyResponse(policy: ActionPolicyResult): { statusCode: number;
       error: {
         code: "ACTION_POLICY_DENIED",
         message: "Action policy denied this request.",
-        details: {
-          decision: policy.decision,
-          reason: policy.reason,
-        },
-      },
-    };
-  }
-
-  if (policy.decision === "requires_approval") {
-    return {
-      statusCode: 409,
-      error: {
-        code: "ACTION_REQUIRES_APPROVAL",
-        message: "Action requires explicit human approval before execution.",
         details: {
           decision: policy.decision,
           reason: policy.reason,
@@ -578,6 +594,39 @@ async function handleAgentsExecute(
     return;
   }
 
+  if (policy.decision === "requires_approval") {
+    const approval = createApprovalRecord({
+      requestId,
+      method: auditContext.method,
+      route: "/agents/execute",
+      advisor: route.advisor,
+      category: route.category,
+      skillId: route.skills[0]?.id,
+      selectedSkillIds: route.skills.map((skill) => skill.id),
+      policyReason: policy.reason,
+      matchedTerms: policy.matchedTerms,
+      message: parsed.body.message,
+      context: parsed.body.context,
+    });
+
+    sendError(
+      response,
+      409,
+      {
+        code: "ACTION_REQUIRES_APPROVAL",
+        message: "Action requires explicit human approval before execution.",
+        details: {
+          decision: policy.decision,
+          reason: policy.reason,
+          approval: approvalResponseDetails(approval),
+        },
+      },
+      requestId,
+      auditContext,
+    );
+    return;
+  }
+
   const execution = executeFirstSkillForRoute(route, {
     message: parsed.body.message,
     context: parsed.body.context,
@@ -625,6 +674,37 @@ async function handleAgentsSkillExecute(
 
   if (policyError) {
     sendError(response, policyError.statusCode, policyError.error, requestId, auditContext);
+    return;
+  }
+
+  if (policy.decision === "requires_approval") {
+    const approval = createApprovalRecord({
+      requestId,
+      method: auditContext.method,
+      route: "/agents/skills/execute",
+      skillId: parsed.body.skillId,
+      selectedSkillIds: [parsed.body.skillId],
+      policyReason: policy.reason,
+      matchedTerms: policy.matchedTerms,
+      message: typeof parsed.body.context.message === "string" ? parsed.body.context.message : undefined,
+      context: parsed.body.context,
+    });
+
+    sendError(
+      response,
+      409,
+      {
+        code: "ACTION_REQUIRES_APPROVAL",
+        message: "Action requires explicit human approval before execution.",
+        details: {
+          decision: policy.decision,
+          reason: policy.reason,
+          approval: approvalResponseDetails(approval),
+        },
+      },
+      requestId,
+      auditContext,
+    );
     return;
   }
 
@@ -704,7 +784,7 @@ export const server = createServer(async (request, response) => {
         response,
         200,
         {
-          events: listApiAuditEvents({ limit: auditLimitFromUrl(request.url) }),
+          events: listApiAuditEvents({ limit: limitFromUrl(request.url) }),
         },
         requestId,
       );
@@ -729,11 +809,74 @@ export const server = createServer(async (request, response) => {
         200,
         {
           dashboard: buildAdvisorDashboardSummary({
-            limit: auditLimitFromUrl(request.url),
+            limit: limitFromUrl(request.url),
           }),
         },
         requestId,
       );
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
+      return;
+    }
+
+    if (request.method === "GET" && requestPath === "/agents/approvals") {
+      const adminAuth = verifyAdminRequest(request);
+
+      if (!adminAuth.ok) {
+        sendError(response, adminAuth.statusCode, adminAuth.error, requestId, {
+          method: request.method ?? "UNKNOWN",
+          route: requestPath,
+        });
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode, requestStartedAt);
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        {
+          approvals: listApprovalRecords({ limit: limitFromUrl(request.url) }),
+        },
+        requestId,
+      );
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
+      return;
+    }
+
+    if (request.method === "GET" && requestPath.startsWith("/agents/approvals/")) {
+      const adminAuth = verifyAdminRequest(request);
+
+      if (!adminAuth.ok) {
+        sendError(response, adminAuth.statusCode, adminAuth.error, requestId, {
+          method: request.method ?? "UNKNOWN",
+          route: "/agents/approvals",
+        });
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode, requestStartedAt);
+        return;
+      }
+
+      const approvalId = approvalIdFromPath(requestPath);
+      const approval = approvalId ? getApprovalRecord(approvalId) : undefined;
+
+      if (!approval) {
+        sendError(
+          response,
+          404,
+          {
+            code: "APPROVAL_NOT_FOUND",
+            message: "Approval record was not found.",
+            details: {},
+          },
+          requestId,
+          {
+            method: request.method ?? "UNKNOWN",
+            route: "/agents/approvals",
+          },
+        );
+        logRequest(requestId, request.method, request.url, 404, requestStartedAt);
+        return;
+      }
+
+      sendJson(response, 200, { approval }, requestId);
       logRequest(requestId, request.method, request.url, 200, requestStartedAt);
       return;
     }
@@ -790,9 +933,10 @@ export const server = createServer(async (request, response) => {
       "/agents/audit",
       "/agents/dashboard",
       "/agents/metrics",
+      "/agents/approvals",
     ]);
 
-    if (knownPaths.has(requestPath)) {
+    if (knownPaths.has(requestPath) || requestPath.startsWith("/agents/approvals/")) {
       sendError(
         response,
         405,
