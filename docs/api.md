@@ -16,6 +16,7 @@ The OpenAPI contract is available at `apps/api/openapi.yaml`.
 - `GET /agents/audit`
 - `GET /agents/dashboard`
 - `GET /agents/metrics`
+- `GET /agents/snapshot`
 - `GET /agents/approvals`
 - `GET /agents/approvals/summary`
 - `GET /agents/approvals/:id`
@@ -110,3 +111,5 @@ The integrity check compares the live deterministic manifest output against `app
 ## Approval Decisions
 
 `requires_approval` actions create in-memory approval records and do not execute. Admin-protected approval decision endpoints can mark records as approved or rejected, but the current baseline records the decision only and does not execute deferred actions automatically. Pending approval records expire after 24 hours; expired records are terminal and cannot be approved, rejected, or executed. `GET /agents/approvals/summary` returns safe status counts, and `POST /agents/approvals/expire` explicitly runs stale-record expiration. Approval records store safe metadata, digests, lengths, and safe context keys rather than raw input, authorization headers, secrets, tokens, passwords, private keys, or OTLP values.
+
+`GET /agents/snapshot` returns an admin-safe operational support bundle composed from already-safe advisor dashboard, audit, approval, and metrics metadata. It omits raw request bodies, full user input, authorization headers, admin API keys, OTLP headers, and recent telemetry event payloads.

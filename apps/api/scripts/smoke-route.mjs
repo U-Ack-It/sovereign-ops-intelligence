@@ -7,6 +7,7 @@ const SKILL_EXECUTE_PATH = "/agents/skills/execute";
 const AUDIT_PATH = "/agents/audit";
 const DASHBOARD_PATH = "/agents/dashboard";
 const METRICS_PATH = "/agents/metrics";
+const SNAPSHOT_PATH = "/agents/snapshot";
 const APPROVALS_PATH = "/agents/approvals";
 const host = "127.0.0.1";
 let port = 0;
@@ -127,6 +128,7 @@ function getJson(path) {
     (path.startsWith(AUDIT_PATH) ||
       path.startsWith(DASHBOARD_PATH) ||
       path.startsWith(METRICS_PATH) ||
+      path.startsWith(SNAPSHOT_PATH) ||
       path.startsWith(APPROVALS_PATH))
   ) {
     headers["x-admin-api-key"] = process.env.SOVEREIGN_ADMIN_API_KEY;
@@ -485,6 +487,27 @@ async function assertMetricsEndpoint() {
   );
 }
 
+async function assertSnapshotEndpoint() {
+  const response = await getJson(`${SNAPSHOT_PATH}?limit=1`);
+
+  assert(
+    response.statusCode === 200,
+    `/agents/snapshot: expected HTTP 200, got ${response.statusCode}`,
+  );
+
+  const parsed = JSON.parse(response.body);
+
+  assert(parsed.snapshot, "/agents/snapshot: expected snapshot");
+  assert(parsed.snapshot.status === "ok", "/agents/snapshot: expected ok status");
+  assert(parsed.snapshot.retention, "/agents/snapshot: expected retention metadata");
+  assert(parsed.snapshot.retention.rawInputsStored === false, "/agents/snapshot: expected rawInputsStored false");
+  assert(Array.isArray(parsed.snapshot.advisors), "/agents/snapshot: expected advisors array");
+  assert(parsed.snapshot.audit && typeof parsed.snapshot.audit === "object", "/agents/snapshot: expected audit object");
+  assert(parsed.snapshot.approvals && typeof parsed.snapshot.approvals === "object", "/agents/snapshot: expected approvals object");
+  assert(parsed.snapshot.metrics && typeof parsed.snapshot.metrics === "object", "/agents/snapshot: expected metrics object");
+  assert(!parsed.snapshot.metrics.telemetry, "/agents/snapshot: expected telemetry events to be omitted");
+}
+
 await new Promise((resolve) => {
   server.listen(0, host, () => {
     const address = server.address();
@@ -551,6 +574,9 @@ try {
 
   await assertMetricsEndpoint();
   console.log("PASS /agents/metrics");
+
+  await assertSnapshotEndpoint();
+  console.log("PASS /agents/snapshot");
 } finally {
   await new Promise((resolve, reject) => {
     server.close((error) => {

@@ -20,6 +20,7 @@ import { executeFirstSkillForRoute } from "./agents/executor.js";
 import { orchestrateAgentRequest } from "./agents/orchestrator.js";
 import { SkillExecutionContext, executeSkill } from "./agents/skill-executor.js";
 import { getApiMetricsSnapshot, recordHttpRequestMetric, recordTelemetryEvent } from "./observability.js";
+import { buildOperationalSnapshot } from "./operational-snapshot.js";
 import { initializeOtelExportIfEnabled, shutdownOtelExport } from "./otel-exporter.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -136,6 +137,7 @@ function metricRouteLabel(url: string | undefined): string {
     "/agents/audit",
     "/agents/dashboard",
     "/agents/metrics",
+    "/agents/snapshot",
     "/agents/approvals",
     "/agents/route",
     "/agents/execute",
@@ -1248,6 +1250,30 @@ export const server = createServer(async (request, response) => {
         200,
         {
           metrics: getApiMetricsSnapshot(),
+        },
+        requestId,
+      );
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
+      return;
+    }
+
+    if (request.method === "GET" && requestPath === "/agents/snapshot") {
+      const adminAuth = verifyAdminRequest(request);
+
+      if (!adminAuth.ok) {
+        sendError(response, adminAuth.statusCode, adminAuth.error, requestId, {
+          method: request.method ?? "UNKNOWN",
+          route: requestPath,
+        });
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode, requestStartedAt);
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        {
+          snapshot: buildOperationalSnapshot({ limit: limitFromUrl(request.url) }),
         },
         requestId,
       );

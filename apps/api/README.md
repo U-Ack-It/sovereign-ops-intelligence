@@ -13,6 +13,7 @@ Local-first TypeScript API for advisor routing, dry-run skill execution, audit v
 - `GET /agents/audit` - in-memory advisor/API audit events.
 - `GET /agents/dashboard` - advisor summary cards and in-memory audit stats.
 - `GET /agents/metrics` - in-memory operational metrics for HTTP, process, and audit activity.
+- `GET /agents/snapshot` - admin-safe operational support snapshot built from existing safe metadata.
 - `GET /agents/approvals` - in-memory approval records for actions waiting on or completed by human decision. Pending records expire after 24 hours.
 - `GET /agents/approvals/summary` - safe in-memory approval counts by status.
 - `GET /agents/approvals/:id` - inspect one approval record.
@@ -56,7 +57,7 @@ npm start
 - `OTEL_EXPORTER_OTLP_ENDPOINT` - OTLP HTTP trace endpoint.
 - `OTEL_EXPORTER_OTLP_HEADERS` - OTLP HTTP headers, usually for backend authentication.
 
-When `SOVEREIGN_ADMIN_API_KEY` is configured, requests to `GET /agents/audit`, `GET /agents/dashboard`, `GET /agents/metrics`, and `GET/POST /agents/approvals...` must include:
+When `SOVEREIGN_ADMIN_API_KEY` is configured, requests to `GET /agents/audit`, `GET /agents/dashboard`, `GET /agents/metrics`, `GET /agents/snapshot`, and `GET/POST /agents/approvals...` must include:
 
 ```text
 x-admin-api-key: <configured key>
@@ -99,7 +100,7 @@ The server handles `SIGTERM` and `SIGINT` by closing the HTTP server before exit
 
 ## Observability
 
-Current mode: in-memory metrics. `GET /agents/metrics` exposes process, HTTP, audit, and telemetry event summaries for local debugging and operational checks. It is admin-protected and does not expose secrets, request bodies, or full user input.
+Current mode: in-memory metrics. `GET /agents/metrics` exposes process, HTTP, audit, and telemetry event summaries for local debugging and operational checks. `GET /agents/snapshot` returns an admin-safe support bundle from already-safe audit, approval, dashboard, and metrics metadata, omitting recent telemetry event payloads. Both routes are admin-protected and do not expose secrets, request bodies, or full user input.
 
 Next integration target: OpenTelemetry Collector. The API now records stable telemetry event concepts such as `http.request`, `advisor.route`, `advisor.execute`, `skill.execute`, and `api.error` with correlation fields like `requestId`, route, method, status code, advisor, and duration where available. A future exporter can send these events to an OpenTelemetry Collector, which can receive, process, and export telemetry to a backend without rewriting the HTTP server.
 
@@ -256,5 +257,6 @@ npm run mcp:manifest:update-snapshot
 - Advisor execution is dry-run and does not call external systems.
 - `/agents/audit` and `/agents/dashboard` are read-only visibility endpoints.
 - `/agents/metrics` is a read-only admin visibility endpoint. It does not expose secrets, request bodies, or environment variable values beyond the environment name.
+- `/agents/snapshot` is a read-only admin support endpoint. It combines safe in-memory metadata and intentionally omits raw inputs, secrets, admin keys, OTLP headers, and recent telemetry event payloads.
 - `/agents/approvals` endpoints are admin-protected. Approval and rejection record decisions only. Approved records can be replayed once in dry-run mode; no external side effects are performed. Pending records expire after 24 hours and expired records cannot be changed or executed. `GET /agents/approvals/summary` returns safe counts, and `POST /agents/approvals/expire` runs the same stale-record expiration sweep explicitly. Approval records store safe metadata, digests, and lengths rather than raw inputs or secrets.
 - Audit, dashboard, and metrics data are currently in-memory only and reset when the process restarts.

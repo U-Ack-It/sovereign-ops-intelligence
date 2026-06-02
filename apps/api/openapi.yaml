@@ -713,6 +713,49 @@ components:
               type: object
               description: Safe export status; endpoint values and headers are not returned.
               additionalProperties: true
+    OperationalSnapshotResponse:
+      type: object
+      required:
+        - snapshot
+      properties:
+        snapshot:
+          type: object
+          required:
+            - status
+            - generatedAt
+            - retention
+            - advisors
+            - audit
+            - approvals
+            - metrics
+          properties:
+            status:
+              type: string
+              enum: [ok]
+            generatedAt:
+              type: string
+              format: date-time
+            retention:
+              type: object
+              description: In-memory retention metadata. Raw inputs are not stored.
+              additionalProperties: true
+            advisors:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            audit:
+              type: object
+              description: Safe audit stats and recent audit events.
+              additionalProperties: true
+            approvals:
+              type: object
+              description: Safe approval summary and recent approval metadata.
+              additionalProperties: true
+            metrics:
+              type: object
+              description: Safe process, HTTP, audit, and export metrics. Recent telemetry events are intentionally omitted.
+              additionalProperties: true
 paths:
   /health:
     get:
@@ -1168,6 +1211,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MetricsResponse"
+        "401":
+          description: Admin API key required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin API key invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/snapshot:
+    get:
+      tags: [Admin Visibility]
+      summary: Admin-safe operational support snapshot
+      description: Returns a support bundle from already-safe in-memory audit, approval, dashboard, and metrics metadata. Raw inputs, secrets, admin keys, OTLP headers, and recent telemetry payloads are not returned.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 25
+      responses:
+        "200":
+          description: Operational snapshot.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationalSnapshotResponse"
         "401":
           description: Admin API key required.
           content:

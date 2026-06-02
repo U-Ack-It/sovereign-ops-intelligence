@@ -528,6 +528,31 @@ function assertMetricsShape(value: unknown): void {
   }
 }
 
+function assertOperationalSnapshotShape(value: unknown): void {
+  assertJsonObject(value, "snapshot");
+  assert.equal(value.status, "ok");
+  assertString(value.generatedAt, "snapshot.generatedAt");
+  assertJsonObject(value.retention, "snapshot.retention");
+  assert.equal(value.retention.mode, "in_memory");
+  assert.equal(value.retention.rawInputsStored, false);
+  assert.equal(typeof value.retention.maxAuditEvents, "number");
+  assert.equal(typeof value.retention.maxApprovalRecords, "number");
+  assert.ok(Array.isArray(value.advisors), "snapshot.advisors should be an array");
+  assert.ok(value.advisors.length > 0, "snapshot.advisors should not be empty");
+  assertJsonObject(value.audit, "snapshot.audit");
+  assertJsonObject(value.audit.stats, "snapshot.audit.stats");
+  assert.ok(Array.isArray(value.audit.recentEvents), "snapshot.audit.recentEvents should be an array");
+  assertJsonObject(value.approvals, "snapshot.approvals");
+  assertApprovalSummaryShape(value.approvals.summary);
+  assert.ok(Array.isArray(value.approvals.recentRecords), "snapshot.approvals.recentRecords should be an array");
+  assertJsonObject(value.metrics, "snapshot.metrics");
+  assertJsonObject(value.metrics.process, "snapshot.metrics.process");
+  assertJsonObject(value.metrics.http, "snapshot.metrics.http");
+  assertJsonObject(value.metrics.audit, "snapshot.metrics.audit");
+  assertJsonObject(value.metrics.export, "snapshot.metrics.export");
+  assert.equal("telemetry" in value.metrics, false, "snapshot metrics should not include telemetry events");
+}
+
 function restoreEnv(name: string, value: string | undefined): void {
   if (value === undefined) {
     delete process.env[name];
@@ -1695,6 +1720,66 @@ test("dashboard endpoint returns advisor summary, audit stats, and does not reco
   }
 });
 
+test("operational snapshot endpoint returns a safe admin support bundle", async () => {
+  clearApiAuditEvents();
+  clearApprovalRecords();
+  resetApiMetrics();
+  const port = await listenForTest();
+
+  try {
+    await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "Schedule maintenance for the property inspection." }),
+      { requestId: "snapshot-route-request" },
+    );
+    await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "access_review",
+        context: {
+          message: "Review password access for the gate system.",
+          authorization: "snapshot-must-not-store",
+        },
+      }),
+      { requestId: "snapshot-approval-request" },
+    );
+
+    const beforeReadCount = listApiAuditEvents({ limit: 100 }).length;
+    const response = await requestJson(port, "GET", "/agents/snapshot?limit=1", undefined, {
+      requestId: "snapshot-read-request",
+    });
+    const afterReadCount = listApiAuditEvents({ limit: 100 }).length;
+
+    assert.equal(response.statusCode, 200);
+    assertJsonResponse(response);
+    assertRequestIdHeader(response, "snapshot-read-request");
+    assert.equal(afterReadCount, beforeReadCount);
+    const body = JSON.parse(response.body) as Record<string, unknown>;
+    assertOperationalSnapshotShape(body.snapshot);
+    assertJsonObject(body.snapshot, "snapshot body");
+    const snapshot = body.snapshot;
+    assertJsonObject(snapshot.audit, "snapshot audit");
+    assert.ok(Array.isArray(snapshot.audit.recentEvents));
+    assert.equal(snapshot.audit.recentEvents.length, 1);
+    assertJsonObject(snapshot.approvals, "snapshot approvals");
+    assert.ok(Array.isArray(snapshot.approvals.recentRecords));
+    assert.equal(snapshot.approvals.recentRecords.length, 1);
+    assertApprovalRecordShape(snapshot.approvals.recentRecords[0]);
+
+    const serialized = response.body;
+    assert.doesNotMatch(serialized, /snapshot-must-not-store|authorization|password access for the gate system/i);
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+    clearApprovalRecords();
+    resetApiMetrics();
+  }
+});
+
 test("observability sinks receive safe telemetry events and sink failures do not throw", () => {
   resetApiMetrics();
   const received: unknown[] = [];
@@ -1932,6 +2017,9 @@ test("admin visibility endpoints stay open in local mode when no admin key is co
     const metrics = await requestJson(port, "GET", "/agents/metrics", undefined, {
       requestId: "local-metrics-request",
     });
+    const snapshot = await requestJson(port, "GET", "/agents/snapshot", undefined, {
+      requestId: "local-snapshot-request",
+    });
     const approvals = await requestJson(port, "GET", "/agents/approvals", undefined, {
       requestId: "local-approvals-request",
     });
@@ -1952,6 +2040,12 @@ test("admin visibility endpoints stay open in local mode when no admin key is co
     assertRequestIdHeader(metrics, "local-metrics-request");
     const metricsBody = JSON.parse(metrics.body) as Record<string, unknown>;
     assertMetricsShape(metricsBody.metrics);
+
+    assert.equal(snapshot.statusCode, 200);
+    assertJsonResponse(snapshot);
+    assertRequestIdHeader(snapshot, "local-snapshot-request");
+    const snapshotBody = JSON.parse(snapshot.body) as Record<string, unknown>;
+    assertOperationalSnapshotShape(snapshotBody.snapshot);
 
     assert.equal(approvals.statusCode, 200);
     assertJsonResponse(approvals);
@@ -1993,6 +2087,9 @@ test("configured admin key protects audit, dashboard, metrics, and approvals end
     const metricsMissing = await requestJson(port, "GET", "/agents/metrics", undefined, {
       requestId: "admin-metrics-missing",
     });
+    const snapshotMissing = await requestJson(port, "GET", "/agents/snapshot", undefined, {
+      requestId: "admin-snapshot-missing",
+    });
     const approvalsMissing = await requestJson(port, "GET", "/agents/approvals", undefined, {
       requestId: "admin-approvals-missing",
     });
@@ -2009,6 +2106,10 @@ test("configured admin key protects audit, dashboard, metrics, and approvals end
     });
     const metricsWrong = await requestJson(port, "GET", "/agents/metrics", undefined, {
       requestId: "admin-metrics-wrong",
+      adminApiKey: "wrong-admin-key",
+    });
+    const snapshotWrong = await requestJson(port, "GET", "/agents/snapshot", undefined, {
+      requestId: "admin-snapshot-wrong",
       adminApiKey: "wrong-admin-key",
     });
     const approvalsWrong = await requestJson(port, "GET", "/agents/approvals", undefined, {
@@ -2031,6 +2132,10 @@ test("configured admin key protects audit, dashboard, metrics, and approvals end
       requestId: "admin-metrics-correct",
       adminApiKey: "test-admin-key",
     });
+    const snapshotCorrect = await requestJson(port, "GET", "/agents/snapshot", undefined, {
+      requestId: "admin-snapshot-correct",
+      adminApiKey: "test-admin-key",
+    });
     const approvalsCorrect = await requestJson(port, "GET", "/agents/approvals", undefined, {
       requestId: "admin-approvals-correct",
       adminApiKey: "test-admin-key",
@@ -2047,11 +2152,13 @@ test("configured admin key protects audit, dashboard, metrics, and approvals end
     assertStructuredError(auditMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-audit-missing");
     assertStructuredError(dashboardMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-dashboard-missing");
     assertStructuredError(metricsMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-metrics-missing");
+    assertStructuredError(snapshotMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-snapshot-missing");
     assertStructuredError(approvalsMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-approvals-missing");
     assertStructuredError(approvalSummaryMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-approvals-summary-missing");
     assertStructuredError(auditWrong, 403, "ADMIN_AUTH_INVALID", "admin-audit-wrong");
     assertStructuredError(dashboardWrong, 403, "ADMIN_AUTH_INVALID", "admin-dashboard-wrong");
     assertStructuredError(metricsWrong, 403, "ADMIN_AUTH_INVALID", "admin-metrics-wrong");
+    assertStructuredError(snapshotWrong, 403, "ADMIN_AUTH_INVALID", "admin-snapshot-wrong");
     assertStructuredError(approvalsWrong, 403, "ADMIN_AUTH_INVALID", "admin-approvals-wrong");
     assertStructuredError(approvalExpireWrong, 403, "ADMIN_AUTH_INVALID", "admin-approvals-expire-wrong");
 
@@ -2070,6 +2177,12 @@ test("configured admin key protects audit, dashboard, metrics, and approvals end
     assertRequestIdHeader(metricsCorrect, "admin-metrics-correct");
     const metricsBody = JSON.parse(metricsCorrect.body) as Record<string, unknown>;
     assertMetricsShape(metricsBody.metrics);
+
+    assert.equal(snapshotCorrect.statusCode, 200);
+    assertJsonResponse(snapshotCorrect);
+    assertRequestIdHeader(snapshotCorrect, "admin-snapshot-correct");
+    const snapshotBody = JSON.parse(snapshotCorrect.body) as Record<string, unknown>;
+    assertOperationalSnapshotShape(snapshotBody.snapshot);
 
     assert.equal(approvalsCorrect.statusCode, 200);
     assertJsonResponse(approvalsCorrect);
@@ -2115,6 +2228,9 @@ test("production mode fails closed for admin visibility, metrics, and approvals 
     const metrics = await requestJson(port, "GET", "/agents/metrics", undefined, {
       requestId: "prod-metrics-request",
     });
+    const snapshot = await requestJson(port, "GET", "/agents/snapshot", undefined, {
+      requestId: "prod-snapshot-request",
+    });
     const approvals = await requestJson(port, "GET", "/agents/approvals", undefined, {
       requestId: "prod-approvals-request",
     });
@@ -2128,6 +2244,7 @@ test("production mode fails closed for admin visibility, metrics, and approvals 
     assertStructuredError(audit, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-audit-request");
     assertStructuredError(dashboard, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-dashboard-request");
     assertStructuredError(metrics, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-metrics-request");
+    assertStructuredError(snapshot, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-snapshot-request");
     assertStructuredError(approvals, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-approvals-request");
     assertStructuredError(approvalSummary, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-approvals-summary-request");
     assertStructuredError(approvalExpire, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-approvals-expire-request");
