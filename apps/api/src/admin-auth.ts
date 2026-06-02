@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { IncomingMessage } from "node:http";
 
 export type AdminAuthResult =
@@ -28,12 +28,8 @@ function headerValue(request: IncomingMessage, name: string): string | undefined
 }
 
 function safeCompare(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
-  }
+  const leftBuffer = createHash("sha256").update(left, "utf8").digest();
+  const rightBuffer = createHash("sha256").update(right, "utf8").digest();
 
   return timingSafeEqual(leftBuffer, rightBuffer);
 }
