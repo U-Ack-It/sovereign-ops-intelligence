@@ -1406,9 +1406,17 @@ test("unknown route and unsupported method return structured errors", async () =
   try {
     const unknown = await requestJson(port, "GET", "/missing");
     const unsupported = await requestJson(port, "GET", "/agents/route");
+    const unsupportedHealth = await requestJson(port, "POST", "/health");
+    const unsupportedSnapshot = await requestJson(port, "POST", "/agents/snapshot");
 
     assertStructuredError(unknown, 404, "NOT_FOUND");
     assertStructuredError(unsupported, 405, "UNSUPPORTED_METHOD");
+    assertStructuredError(unsupportedHealth, 405, "UNSUPPORTED_METHOD");
+    assertStructuredError(unsupportedSnapshot, 405, "UNSUPPORTED_METHOD");
+    assert.equal(unknown.headers.allow, undefined);
+    assert.equal(unsupported.headers.allow, "POST");
+    assert.equal(unsupportedHealth.headers.allow, "GET");
+    assert.equal(unsupportedSnapshot.headers.allow, "GET");
   } finally {
     await closeServer();
   }

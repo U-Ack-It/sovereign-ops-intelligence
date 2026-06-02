@@ -159,6 +159,36 @@ function metricRouteLabel(url: string | undefined): string {
   return knownMetricRoutes.has(path) ? path : "unknown";
 }
 
+function allowedMethodsForPath(path: string): string[] | null {
+  const staticAllowedMethods = new Map<string, string[]>([
+    ["/health", ["GET"]],
+    ["/ready", ["GET"]],
+    ["/version", ["GET"]],
+    ["/agents/audit", ["GET"]],
+    ["/agents/dashboard", ["GET"]],
+    ["/agents/metrics", ["GET"]],
+    ["/agents/snapshot", ["GET"]],
+    ["/agents/approvals", ["GET"]],
+    ["/agents/approvals/summary", ["GET"]],
+    ["/agents/approvals/expire", ["POST"]],
+    ["/agents/route", ["POST"]],
+    ["/agents/execute", ["POST"]],
+    ["/agents/skills/execute", ["POST"]],
+  ]);
+
+  const staticMethods = staticAllowedMethods.get(path);
+
+  if (staticMethods) {
+    return staticMethods;
+  }
+
+  if (path.startsWith("/agents/approvals/")) {
+    return ["GET", "POST"];
+  }
+
+  return null;
+}
+
 function limitFromUrl(url: string | undefined): number {
   try {
     const parsed = new URL(url ?? "/", "http://local");
@@ -454,10 +484,12 @@ function sendJson(
   statusCode: number,
   payload: JsonResponse,
   requestId?: string,
+  extraHeaders: Record<string, string> = {},
 ): void {
   const headers: Record<string, string> = {
     ...SECURITY_RESPONSE_HEADERS,
     "content-type": "application/json",
+    ...extraHeaders,
   };
 
   if (requestId) {
@@ -477,6 +509,7 @@ function sendError(
     method: string;
     route: string;
   },
+  extraHeaders: Record<string, string> = {},
 ): void {
   if (auditContext) {
     safeRecordApiAuditEvent({
@@ -501,6 +534,7 @@ function sendError(
       },
     },
     requestId,
+    extraHeaders,
   );
 }
 
@@ -1310,20 +1344,9 @@ export const server = createServer(async (request, response) => {
       return;
     }
 
-    const knownPaths = new Set([
-      "/health",
-      "/ready",
-      "/version",
-      "/agents/route",
-      "/agents/execute",
-      "/agents/skills/execute",
-      "/agents/audit",
-      "/agents/dashboard",
-      "/agents/metrics",
-      "/agents/approvals",
-    ]);
+    const allowedMethods = allowedMethodsForPath(requestPath);
 
-    if (knownPaths.has(requestPath) || requestPath.startsWith("/agents/approvals/")) {
+    if (allowedMethods) {
       sendError(
         response,
         405,
@@ -1339,6 +1362,9 @@ export const server = createServer(async (request, response) => {
         {
           method: request.method ?? "UNKNOWN",
           route: requestPath,
+        },
+        {
+          allow: allowedMethods.join(", "),
         },
       );
       logRequest(requestId, request.method, request.url, 405, requestStartedAt);

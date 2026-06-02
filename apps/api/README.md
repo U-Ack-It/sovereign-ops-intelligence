@@ -69,6 +69,8 @@ In production, `SOVEREIGN_ADMIN_API_KEY` must be configured and must not be an o
 
 All JSON API responses include baseline hardening headers: `Cache-Control: no-store`, `Content-Security-Policy`, `Cross-Origin-Resource-Policy`, `Referrer-Policy`, `X-Content-Type-Options`, and `X-Frame-Options`. These headers are applied centrally to success and error responses and are covered by contract tests.
 
+Unsupported methods on known routes return structured `405` errors with an `Allow` header listing supported methods.
+
 ## Deployment
 
 Build output is written to `dist` and excludes test files.
