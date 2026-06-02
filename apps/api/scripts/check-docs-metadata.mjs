@@ -31,6 +31,8 @@ const requiredMkdocsTokens = ["techdocs-core"];
 
 const requiredOpenApiTokens = [
   "openapi:",
+  "ApiKeyAuth:",
+  "ErrorResponse:",
   "/health",
   "/ready",
   "/version",
@@ -40,8 +42,31 @@ const requiredOpenApiTokens = [
   "/agents/audit",
   "/agents/dashboard",
   "/agents/metrics",
+  "/agents/snapshot",
   "/agents/approvals",
+  "/agents/approvals/summary",
+  "/agents/approvals/expire",
+  "/agents/approvals/{approvalId}",
+  "/agents/approvals/{approvalId}/approve",
+  "/agents/approvals/{approvalId}/reject",
+  "/agents/approvals/{approvalId}/execute",
+  "x-request-id",
   "x-admin-api-key",
+];
+
+const requiredApiDocsTokens = [
+  "/agents/snapshot",
+  "/agents/approvals/summary",
+  "/agents/approvals/:id/execute",
+  "x-request-id",
+  "x-admin-api-key",
+];
+
+const requiredOperationsDocsTokens = [
+  "verify:release",
+  "verify:production",
+  "SOVEREIGN_ADMIN_API_KEY",
+  "smoke:production",
 ];
 
 function readRepoFile(relativePath) {
@@ -72,6 +97,14 @@ if (failures.length === 0) {
 
   for (const token of collectMissingTokens("apps/api/openapi.yaml", requiredOpenApiTokens)) {
     failures.push(`apps/api/openapi.yaml missing token: ${token}`);
+  }
+
+  for (const token of collectMissingTokens("docs/api.md", requiredApiDocsTokens)) {
+    failures.push(`docs/api.md missing token: ${token}`);
+  }
+
+  for (const token of collectMissingTokens("docs/operations.md", requiredOperationsDocsTokens)) {
+    failures.push(`docs/operations.md missing token: ${token}`);
   }
 }
 
