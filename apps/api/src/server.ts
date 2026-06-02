@@ -4,7 +4,7 @@ import { AddressInfo } from "node:net";
 import { pathToFileURL } from "node:url";
 
 import { evaluateActionPolicy, type ActionPolicyResult } from "./action-policy.js";
-import { createApprovalRecord, getApprovalRecord, listApprovalRecords } from "./approvals.js";
+import { createApprovalRecord, decideApprovalRecord, getApprovalRecord, listApprovalRecords } from "./approvals.js";
 import { verifyAdminRequest } from "./admin-auth.js";
 import { ApiAuditEventType, ApiAuditStatus, listApiAuditEvents, recordApiAuditEvent } from "./agents/audit-trail.js";
 import { buildAdvisorDashboardSummary } from "./agents/dashboard.js";
@@ -35,6 +35,10 @@ type ParsedError = {
 type SkillExecuteRequestBody = {
   skillId: string;
   context: SkillExecutionContext;
+};
+
+type ApprovalDecisionRequestBody = {
+  reason?: string;
 };
 
 type PackageMetadata = {
@@ -376,6 +380,57 @@ export function parseSkillExecuteRequestBody(rawBody: string):
   };
 }
 
+export function parseApprovalDecisionRequestBody(rawBody: string):
+  | { ok: true; body: ApprovalDecisionRequestBody }
+  | { ok: false; error: ParsedError } {
+  if (!rawBody.trim()) {
+    return { ok: true, body: {} };
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_JSON",
+        message: "Invalid JSON body.",
+      },
+    };
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_BODY",
+        message: "Request body must be a JSON object.",
+      },
+    };
+  }
+
+  const body = parsed as Record<string, unknown>;
+
+  if ("reason" in body && body.reason !== undefined && typeof body.reason !== "string") {
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_APPROVAL_DECISION_INPUT",
+        message: "Approval decision reason must be a string when provided.",
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    body: {
+      reason: typeof body.reason === "string" ? body.reason : undefined,
+    },
+  };
+}
+
 function sendJson(
   response: ServerResponse,
   statusCode: number,
@@ -435,8 +490,20 @@ function approvalIdFromPath(path: string): string | null {
     return null;
   }
 
-  const id = path.slice(prefix.length).trim();
+  const id = path.slice(prefix.length).split("/")[0]?.trim();
   return id || null;
+}
+
+function approvalDecisionFromPath(path: string): "approved" | "rejected" | null {
+  if (path.endsWith("/approve")) {
+    return "approved";
+  }
+
+  if (path.endsWith("/reject")) {
+    return "rejected";
+  }
+
+  return null;
 }
 
 function approvalResponseDetails(approval: ReturnType<typeof createApprovalRecord>): Record<string, unknown> {
@@ -444,11 +511,13 @@ function approvalResponseDetails(approval: ReturnType<typeof createApprovalRecor
     id: approval.id,
     status: approval.status,
     createdAt: approval.createdAt,
+    decidedAt: approval.decidedAt,
     route: approval.route,
     advisor: approval.advisor,
     category: approval.category,
     skillId: approval.skillId,
     selectedSkillIds: approval.selectedSkillIds,
+    decision: approval.decision,
   };
 }
 
@@ -648,6 +717,77 @@ async function handleAgentsExecute(
   sendJson(response, 200, { requestId, route, execution, actionPolicy: policy }, requestId);
 }
 
+async function handleApprovalDecision(
+  request: IncomingMessage,
+  response: ServerResponse,
+  requestId: string,
+  approvalId: string,
+  decision: "approved" | "rejected",
+): Promise<void> {
+  const auditContext = {
+    method: request.method ?? "UNKNOWN",
+    route: "/agents/approvals",
+  };
+  const rawBody = await readBody(request);
+  const parsed = parseApprovalDecisionRequestBody(rawBody);
+
+  if (!parsed.ok) {
+    sendError(response, 400, parsed.error, requestId, auditContext);
+    return;
+  }
+
+  const result = decideApprovalRecord(approvalId, {
+    requestId,
+    decision,
+    reason: parsed.body.reason,
+  });
+
+  if (!result.ok) {
+    const statusCode = result.code === "APPROVAL_NOT_FOUND" ? 404 : 409;
+    sendError(
+      response,
+      statusCode,
+      {
+        code: result.code,
+        message:
+          result.code === "APPROVAL_NOT_FOUND"
+            ? "Approval record was not found."
+            : "Approval record has already been decided.",
+        details: result.approval ? { approval: approvalResponseDetails(result.approval) } : {},
+      },
+      requestId,
+      auditContext,
+    );
+    return;
+  }
+
+  safeRecordApiAuditEvent({
+    requestId,
+    method: auditContext.method,
+    route: auditContext.route,
+    eventType: "approval.decision",
+    status: "success",
+    advisor: result.approval.advisor,
+    selectedSkillIds: result.approval.selectedSkillIds,
+    errorCode: decision === "approved" ? "APPROVAL_APPROVED" : "APPROVAL_REJECTED",
+  });
+
+  sendJson(
+    response,
+    200,
+    {
+      requestId,
+      approval: result.approval,
+      decision,
+      execution: {
+        status: "not_executed",
+        reason: "Approval decision recorded. Deferred action execution is not enabled in this baseline.",
+      },
+    },
+    requestId,
+  );
+}
+
 async function handleAgentsSkillExecute(
   request: IncomingMessage,
   response: ServerResponse,
@@ -840,6 +980,28 @@ export const server = createServer(async (request, response) => {
       );
       logRequest(requestId, request.method, request.url, 200, requestStartedAt);
       return;
+    }
+
+    if (request.method === "POST" && requestPath.startsWith("/agents/approvals/")) {
+      const decision = approvalDecisionFromPath(requestPath);
+      const approvalId = approvalIdFromPath(requestPath);
+
+      if (decision && approvalId) {
+        const adminAuth = verifyAdminRequest(request);
+
+        if (!adminAuth.ok) {
+          sendError(response, adminAuth.statusCode, adminAuth.error, requestId, {
+            method: request.method ?? "UNKNOWN",
+            route: "/agents/approvals",
+          });
+          logRequest(requestId, request.method, request.url, adminAuth.statusCode, requestStartedAt);
+          return;
+        }
+
+        await handleApprovalDecision(request, response, requestId, approvalId, decision);
+        logRequest(requestId, request.method, request.url, response.statusCode, requestStartedAt);
+        return;
+      }
     }
 
     if (request.method === "GET" && requestPath.startsWith("/agents/approvals/")) {

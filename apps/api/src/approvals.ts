@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
-export type ApprovalStatus = "pending";
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+export type ApprovalDecision = "approved" | "rejected";
 
 export type ApprovalRecord = {
   id: string;
@@ -20,6 +21,11 @@ export type ApprovalRecord = {
   inputDigest: string;
   contextKeys: string[];
   contextDigest: string;
+  decidedAt?: string;
+  decisionRequestId?: string;
+  decision?: ApprovalDecision;
+  decisionReasonLength?: number;
+  decisionReasonDigest?: string;
 };
 
 type CreateApprovalRecordInput = {
@@ -35,6 +41,16 @@ type CreateApprovalRecordInput = {
   message?: string;
   context?: Record<string, unknown>;
 };
+
+type DecideApprovalRecordInput = {
+  requestId: string;
+  decision: ApprovalDecision;
+  reason?: string;
+};
+
+type ApprovalDecisionResult =
+  | { ok: true; approval: ApprovalRecord }
+  | { ok: false; code: "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_DECIDED"; approval?: ApprovalRecord };
 
 type ListApprovalRecordsOptions = {
   limit?: number;
@@ -86,6 +102,19 @@ function normalizedLimit(limit: number | undefined): number {
   return Math.max(0, Math.min(Math.trunc(limit), MAX_RETAINED_APPROVALS));
 }
 
+function cloneApprovalRecord(record: ApprovalRecord): ApprovalRecord {
+  return {
+    ...record,
+    selectedSkillIds: [...record.selectedSkillIds],
+    matchedTerms: [...record.matchedTerms],
+    contextKeys: [...record.contextKeys],
+  };
+}
+
+function approvalById(id: string): ApprovalRecord | undefined {
+  return approvals.find((item) => item.id === id);
+}
+
 export function createApprovalRecord(input: CreateApprovalRecordInput): ApprovalRecord {
   const message = normalizedText(input.message);
   const record: ApprovalRecord = {
@@ -114,31 +143,43 @@ export function createApprovalRecord(input: CreateApprovalRecordInput): Approval
     approvals.length = MAX_RETAINED_APPROVALS;
   }
 
-  return { ...record, selectedSkillIds: [...record.selectedSkillIds], matchedTerms: [...record.matchedTerms], contextKeys: [...record.contextKeys] };
+  return cloneApprovalRecord(record);
+}
+
+export function decideApprovalRecord(id: string, input: DecideApprovalRecordInput): ApprovalDecisionResult {
+  const record = approvalById(id);
+
+  if (!record) {
+    return { ok: false, code: "APPROVAL_NOT_FOUND" };
+  }
+
+  if (record.status !== "pending") {
+    return { ok: false, code: "APPROVAL_ALREADY_DECIDED", approval: cloneApprovalRecord(record) };
+  }
+
+  const reason = normalizedText(input.reason);
+  record.status = input.decision;
+  record.decision = input.decision;
+  record.decidedAt = new Date().toISOString();
+  record.decisionRequestId = input.requestId;
+  record.decisionReasonLength = reason.length;
+  record.decisionReasonDigest = digestText(reason);
+
+  return { ok: true, approval: cloneApprovalRecord(record) };
 }
 
 export function listApprovalRecords(options: ListApprovalRecordsOptions = {}): ApprovalRecord[] {
-  return approvals.slice(0, normalizedLimit(options.limit)).map((record) => ({
-    ...record,
-    selectedSkillIds: [...record.selectedSkillIds],
-    matchedTerms: [...record.matchedTerms],
-    contextKeys: [...record.contextKeys],
-  }));
+  return approvals.slice(0, normalizedLimit(options.limit)).map(cloneApprovalRecord);
 }
 
 export function getApprovalRecord(id: string): ApprovalRecord | undefined {
-  const record = approvals.find((item) => item.id === id);
+  const record = approvalById(id);
 
   if (!record) {
     return undefined;
   }
 
-  return {
-    ...record,
-    selectedSkillIds: [...record.selectedSkillIds],
-    matchedTerms: [...record.matchedTerms],
-    contextKeys: [...record.contextKeys],
-  };
+  return cloneApprovalRecord(record);
 }
 
 export function clearApprovalRecords(): void {

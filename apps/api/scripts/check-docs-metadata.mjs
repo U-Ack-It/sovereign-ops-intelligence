@@ -40,6 +40,7 @@ const requiredOpenApiTokens = [
   "/agents/audit",
   "/agents/dashboard",
   "/agents/metrics",
+  "/agents/approvals",
   "x-admin-api-key",
 ];
 

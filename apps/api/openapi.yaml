@@ -43,6 +43,134 @@ components:
               additionalProperties: true
             requestId:
               type: string
+    ApprovalRecord:
+      type: object
+      required:
+        - id
+        - requestId
+        - createdAt
+        - status
+        - method
+        - route
+        - selectedSkillIds
+        - policyDecision
+        - policyReason
+        - matchedTerms
+        - inputLength
+        - inputDigest
+        - contextKeys
+        - contextDigest
+      properties:
+        id:
+          type: string
+        requestId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        method:
+          type: string
+        route:
+          type: string
+          enum: [/agents/execute, /agents/skills/execute]
+        advisor:
+          type: string
+        category:
+          type: string
+        skillId:
+          type: string
+        selectedSkillIds:
+          type: array
+          items:
+            type: string
+        policyDecision:
+          type: string
+          enum: [requires_approval]
+        policyReason:
+          type: string
+        matchedTerms:
+          type: array
+          items:
+            type: string
+        inputLength:
+          type: integer
+          description: Length of the original input. The raw input is not stored.
+        inputDigest:
+          type: string
+          description: SHA-256 digest of the original input. The raw input is not stored.
+        contextKeys:
+          type: array
+          description: Safe context keys only. Sensitive keys are omitted.
+          items:
+            type: string
+        contextDigest:
+          type: string
+          description: SHA-256 digest of the safe context shape. Raw context values are not stored.
+        decidedAt:
+          type: string
+          format: date-time
+        decisionRequestId:
+          type: string
+        decision:
+          type: string
+          enum: [approved, rejected]
+        decisionReasonLength:
+          type: integer
+          description: Length of the decision reason. The raw reason is not stored.
+        decisionReasonDigest:
+          type: string
+          description: SHA-256 digest of the decision reason. The raw reason is not stored.
+    ApprovalListResponse:
+      type: object
+      required:
+        - approvals
+      properties:
+        approvals:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalRecord"
+    ApprovalDetailResponse:
+      type: object
+      required:
+        - approval
+      properties:
+        approval:
+          $ref: "#/components/schemas/ApprovalRecord"
+    ApprovalDecisionRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Optional decision reason. The API stores only length and digest.
+    ApprovalDecisionResponse:
+      type: object
+      required:
+        - requestId
+        - approval
+        - decision
+        - execution
+      properties:
+        requestId:
+          type: string
+        approval:
+          $ref: "#/components/schemas/ApprovalRecord"
+        decision:
+          type: string
+          enum: [approved, rejected]
+        execution:
+          type: object
+          required:
+            - status
+            - reason
+          properties:
+            status:
+              type: string
+              enum: [not_executed]
+            reason:
+              type: string
     SkillDefinition:
       type: object
       required:
@@ -387,7 +515,7 @@ components:
           type: string
         eventType:
           type: string
-          enum: [advisor.route, advisor.execute, skill.execute, api.error]
+          enum: [advisor.route, advisor.execute, skill.execute, approval.decision, api.error]
         status:
           type: string
           enum: [success, error]
@@ -626,6 +754,135 @@ paths:
                 $ref: "#/components/schemas/SkillExecutionResponse"
         "400":
           description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/approvals:
+    get:
+      tags: [Admin Visibility]
+      summary: List pending and decided approval records
+      description: Approval records are in-memory and contain safe metadata only, not raw input or secrets.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 100
+      responses:
+        "200":
+          description: Recent approval records.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalListResponse"
+        "401":
+          description: Admin API key required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin API key invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/approvals/{approvalId}:
+    get:
+      tags: [Admin Visibility]
+      summary: Inspect one approval record
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: approvalId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Approval record.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDetailResponse"
+        "404":
+          description: Approval record not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/approvals/{approvalId}/approve:
+    post:
+      tags: [Admin Visibility]
+      summary: Approve a pending approval record
+      description: Records the approval decision only. Deferred action execution is not enabled in this baseline.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: approvalId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecisionRequest"
+      responses:
+        "200":
+          description: Approval decision recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionResponse"
+        "409":
+          description: Approval was already decided.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/approvals/{approvalId}/reject:
+    post:
+      tags: [Admin Visibility]
+      summary: Reject a pending approval record
+      description: Records the rejection decision only. Deferred action execution is not enabled in this baseline.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: approvalId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecisionRequest"
+      responses:
+        "200":
+          description: Rejection decision recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionResponse"
+        "409":
+          description: Approval was already decided.
           content:
             application/json:
               schema:

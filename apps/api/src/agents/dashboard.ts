@@ -17,6 +17,7 @@ export type AdvisorDashboardAuditStats = {
   advisorRouteCount: number;
   advisorExecuteCount: number;
   skillExecuteCount: number;
+  approvalDecisionCount: number;
   apiErrorCount: number;
 };
 
@@ -100,6 +101,7 @@ function buildAuditStats(events: ApiAuditEvent[]): AdvisorDashboardAuditStats {
     advisorRouteCount: events.filter((event) => event.eventType === "advisor.route").length,
     advisorExecuteCount: events.filter((event) => event.eventType === "advisor.execute").length,
     skillExecuteCount: events.filter((event) => event.eventType === "skill.execute").length,
+    approvalDecisionCount: events.filter((event) => event.eventType === "approval.decision").length,
     apiErrorCount: events.filter((event) => event.eventType === "api.error").length,
   };
 }

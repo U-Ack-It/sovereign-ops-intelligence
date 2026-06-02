@@ -16,6 +16,10 @@ The OpenAPI contract is available at `apps/api/openapi.yaml`.
 - `GET /agents/audit`
 - `GET /agents/dashboard`
 - `GET /agents/metrics`
+- `GET /agents/approvals`
+- `GET /agents/approvals/:id`
+- `POST /agents/approvals/:id/approve`
+- `POST /agents/approvals/:id/reject`
 
 When `SOVEREIGN_ADMIN_API_KEY` is configured, protected visibility routes require:
 
@@ -98,3 +102,8 @@ npm --prefix apps/api run verify:mcp
 This runs the manifest catalog check, policy check, and manifest integrity/schema hardening check.
 
 The integrity check compares the live deterministic manifest output against `apps/api/src/mcp/manifest.snapshot.json`. Snapshot updates should be reviewed as client-facing contract changes.
+
+
+## Approval Decisions
+
+`requires_approval` actions create in-memory approval records and do not execute. Admin-protected approval decision endpoints can mark records as approved or rejected, but the current baseline records the decision only and does not execute deferred actions automatically. Approval records store safe metadata, digests, lengths, and safe context keys rather than raw input, authorization headers, secrets, tokens, passwords, private keys, or OTLP values.

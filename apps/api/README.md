@@ -13,6 +13,10 @@ Local-first TypeScript API for advisor routing, dry-run skill execution, audit v
 - `GET /agents/audit` - in-memory advisor/API audit events.
 - `GET /agents/dashboard` - advisor summary cards and in-memory audit stats.
 - `GET /agents/metrics` - in-memory operational metrics for HTTP, process, and audit activity.
+- `GET /agents/approvals` - in-memory approval records for actions waiting on or completed by human decision.
+- `GET /agents/approvals/:id` - inspect one approval record.
+- `POST /agents/approvals/:id/approve` - record approval without automatically executing the deferred action.
+- `POST /agents/approvals/:id/reject` - record rejection without executing the deferred action.
 
 ## Local Commands
 
@@ -49,7 +53,7 @@ npm start
 - `OTEL_EXPORTER_OTLP_ENDPOINT` - OTLP HTTP trace endpoint.
 - `OTEL_EXPORTER_OTLP_HEADERS` - OTLP HTTP headers, usually for backend authentication.
 
-When `SOVEREIGN_ADMIN_API_KEY` is configured, requests to `GET /agents/audit`, `GET /agents/dashboard`, and `GET /agents/metrics` must include:
+When `SOVEREIGN_ADMIN_API_KEY` is configured, requests to `GET /agents/audit`, `GET /agents/dashboard`, `GET /agents/metrics`, and `GET/POST /agents/approvals...` must include:
 
 ```text
 x-admin-api-key: <configured key>
@@ -249,4 +253,5 @@ npm run mcp:manifest:update-snapshot
 - Advisor execution is dry-run and does not call external systems.
 - `/agents/audit` and `/agents/dashboard` are read-only visibility endpoints.
 - `/agents/metrics` is a read-only admin visibility endpoint. It does not expose secrets, request bodies, or environment variable values beyond the environment name.
+- `/agents/approvals` endpoints are admin-protected. Approval and rejection record decisions only; deferred action execution is not enabled in this baseline. Approval records store safe metadata, digests, and lengths rather than raw inputs or secrets.
 - Audit, dashboard, and metrics data are currently in-memory only and reset when the process restarts.

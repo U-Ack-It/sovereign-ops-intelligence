@@ -300,7 +300,7 @@ function assertApprovalRecordShape(value: unknown): void {
   assertString(value.id, "approval.id");
   assertString(value.requestId, "approval.requestId");
   assertString(value.createdAt, "approval.createdAt");
-  assert.equal(value.status, "pending");
+  assert.ok(["pending", "approved", "rejected"].includes(String(value.status)), "approval.status should be known");
   assertString(value.method, "approval.method");
   assert.ok(["/agents/execute", "/agents/skills/execute"].includes(String(value.route)));
   assert.equal(value.policyDecision, "requires_approval");
@@ -315,6 +315,15 @@ function assertApprovalRecordShape(value: unknown): void {
 
   if ("selectedSkillIds" in value) {
     assertStringArray(value.selectedSkillIds, "approval.selectedSkillIds");
+  }
+
+  if (value.status !== "pending") {
+    assertString(value.decidedAt, "approval.decidedAt");
+    assertString(value.decisionRequestId, "approval.decisionRequestId");
+    assert.ok(["approved", "rejected"].includes(String(value.decision)), "approval.decision should be known");
+    assert.equal(typeof value.decisionReasonLength, "number");
+    assertString(value.decisionReasonDigest, "approval.decisionReasonDigest");
+    assert.match(String(value.decisionReasonDigest), /^[a-f0-9]{64}$/);
   }
 }
 
@@ -903,6 +912,144 @@ test("approvals endpoint returns pending approval records by list and id", async
     clearApprovalRecords();
   }
 });
+test("approval decision endpoint approves pending records without executing deferred action", async () => {
+  clearApiAuditEvents();
+  clearApprovalRecords();
+  const port = await listenForTest();
+
+  try {
+    const sensitiveReason = "Approved after phone call; never store token beta-secret.";
+    const approvalResponse = await requestJson(
+      port,
+      "POST",
+      "/agents/execute",
+      JSON.stringify({
+        message: "Review password access for the gate system and reset password alpha-token.",
+        context: {
+          property: "Miami residence",
+          password: "do-not-store",
+        },
+      }),
+      { requestId: "approval-create-before-approve" },
+    );
+
+    assertStructuredError(approvalResponse, 409, "ACTION_REQUIRES_APPROVAL", "approval-create-before-approve");
+    const approvalBody = JSON.parse(approvalResponse.body) as Record<string, unknown>;
+    assertJsonObject(approvalBody.error, "approval required error");
+    assertJsonObject(approvalBody.error.details, "approval required details");
+    assertJsonObject(approvalBody.error.details.approval, "approval required details.approval");
+    const approvalId = String(approvalBody.error.details.approval.id);
+
+    const decisionResponse = await requestJson(
+      port,
+      "POST",
+      `/agents/approvals/${approvalId}/approve`,
+      JSON.stringify({ reason: sensitiveReason }),
+      { requestId: "approval-approve-request" },
+    );
+
+    assert.equal(decisionResponse.statusCode, 200);
+    assertJsonResponse(decisionResponse);
+    assertRequestIdHeader(decisionResponse, "approval-approve-request");
+    const decisionBody = JSON.parse(decisionResponse.body) as Record<string, unknown>;
+    assert.equal(decisionBody.requestId, "approval-approve-request");
+    assert.equal(decisionBody.decision, "approved");
+    assertJsonObject(decisionBody.execution, "approval decision execution");
+    assert.equal(decisionBody.execution.status, "not_executed");
+    assertApprovalRecordShape(decisionBody.approval);
+    assertJsonObject(decisionBody.approval, "approval decision approval");
+    assert.equal(decisionBody.approval.id, approvalId);
+    assert.equal(decisionBody.approval.status, "approved");
+
+    const approvals = listApprovalRecords({ limit: 10 });
+    assert.equal(approvals.length, 1);
+    assert.equal(approvals[0].status, "approved");
+    assert.equal(approvals[0].decision, "approved");
+    assert.equal(approvals[0].decisionRequestId, "approval-approve-request");
+
+    const auditEvents = listApiAuditEvents({ limit: 10 });
+    assert.ok(auditEvents.some((event) => event.eventType === "approval.decision" && event.status === "success"));
+    assert.ok(!auditEvents.some((event) => event.eventType === "advisor.execute"));
+
+    const duplicateResponse = await requestJson(
+      port,
+      "POST",
+      `/agents/approvals/${approvalId}/approve`,
+      JSON.stringify({ reason: "duplicate approval" }),
+      { requestId: "approval-duplicate-request" },
+    );
+    assertStructuredError(duplicateResponse, 409, "APPROVAL_ALREADY_DECIDED", "approval-duplicate-request");
+
+    const serialized = `${decisionResponse.body} ${JSON.stringify(approvals[0])}`;
+    assert.ok(!serialized.includes(sensitiveReason));
+    assert.ok(!serialized.includes("beta-secret"));
+    assert.ok(!serialized.includes("alpha-token"));
+    assert.ok(!serialized.includes("do-not-store"));
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+    clearApprovalRecords();
+  }
+});
+
+test("approval decision endpoint rejects pending records and preserves safe status", async () => {
+  clearApprovalRecords();
+  const port = await listenForTest();
+
+  try {
+    const approvalResponse = await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "contract_risk_scan",
+        context: {
+          message: "Review contract privacy risk before approval.",
+        },
+      }),
+      { requestId: "approval-create-before-reject" },
+    );
+
+    assertStructuredError(approvalResponse, 409, "ACTION_REQUIRES_APPROVAL", "approval-create-before-reject");
+    const approvalBody = JSON.parse(approvalResponse.body) as Record<string, unknown>;
+    assertJsonObject(approvalBody.error, "reject approval error");
+    assertJsonObject(approvalBody.error.details, "reject approval details");
+    assertJsonObject(approvalBody.error.details.approval, "reject approval details.approval");
+    const approvalId = String(approvalBody.error.details.approval.id);
+
+    const decisionResponse = await requestJson(
+      port,
+      "POST",
+      `/agents/approvals/${approvalId}/reject`,
+      JSON.stringify({ reason: "Reject; missing owner confirmation." }),
+      { requestId: "approval-reject-request" },
+    );
+
+    assert.equal(decisionResponse.statusCode, 200);
+    assertJsonResponse(decisionResponse);
+    assertRequestIdHeader(decisionResponse, "approval-reject-request");
+    const decisionBody = JSON.parse(decisionResponse.body) as Record<string, unknown>;
+    assert.equal(decisionBody.decision, "rejected");
+    assertJsonObject(decisionBody.execution, "approval reject execution");
+    assert.equal(decisionBody.execution.status, "not_executed");
+    assertApprovalRecordShape(decisionBody.approval);
+    assertJsonObject(decisionBody.approval, "approval reject detail");
+    assert.equal(decisionBody.approval.status, "rejected");
+
+    const detailResponse = await requestJson(port, "GET", `/agents/approvals/${approvalId}`, undefined, {
+      requestId: "approval-reject-detail-request",
+    });
+    assert.equal(detailResponse.statusCode, 200);
+    const detailBody = JSON.parse(detailResponse.body) as Record<string, unknown>;
+    assertApprovalRecordShape(detailBody.approval);
+    assertJsonObject(detailBody.approval, "approval reject detail body");
+    assert.equal(detailBody.approval.status, "rejected");
+  } finally {
+    await closeServer();
+    clearApprovalRecords();
+  }
+});
+
 test("action policy allows safe generic skill execution", async () => {
   const port = await listenForTest();
 
@@ -1497,6 +1644,9 @@ test("admin visibility endpoints stay open in local mode when no admin key is co
     const metrics = await requestJson(port, "GET", "/agents/metrics", undefined, {
       requestId: "local-metrics-request",
     });
+    const approvals = await requestJson(port, "GET", "/agents/approvals", undefined, {
+      requestId: "local-approvals-request",
+    });
 
     assert.equal(audit.statusCode, 200);
     assertJsonResponse(audit);
@@ -1511,6 +1661,12 @@ test("admin visibility endpoints stay open in local mode when no admin key is co
     assertRequestIdHeader(metrics, "local-metrics-request");
     const metricsBody = JSON.parse(metrics.body) as Record<string, unknown>;
     assertMetricsShape(metricsBody.metrics);
+
+    assert.equal(approvals.statusCode, 200);
+    assertJsonResponse(approvals);
+    assertRequestIdHeader(approvals, "local-approvals-request");
+    const approvalsBody = JSON.parse(approvals.body) as Record<string, unknown>;
+    assert.ok(Array.isArray(approvalsBody.approvals));
   } finally {
     await closeServer();
     clearApiAuditEvents();
@@ -1520,7 +1676,7 @@ test("admin visibility endpoints stay open in local mode when no admin key is co
   }
 });
 
-test("configured admin key protects audit, dashboard, and metrics endpoints", async () => {
+test("configured admin key protects audit, dashboard, metrics, and approvals endpoints", async () => {
   const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
   const originalNodeEnv = process.env.NODE_ENV;
   process.env.SOVEREIGN_ADMIN_API_KEY = "test-admin-key";
@@ -1540,6 +1696,9 @@ test("configured admin key protects audit, dashboard, and metrics endpoints", as
     const metricsMissing = await requestJson(port, "GET", "/agents/metrics", undefined, {
       requestId: "admin-metrics-missing",
     });
+    const approvalsMissing = await requestJson(port, "GET", "/agents/approvals", undefined, {
+      requestId: "admin-approvals-missing",
+    });
     const auditWrong = await requestJson(port, "GET", "/agents/audit", undefined, {
       requestId: "admin-audit-wrong",
       adminApiKey: "wrong-admin-key",
@@ -1550,6 +1709,10 @@ test("configured admin key protects audit, dashboard, and metrics endpoints", as
     });
     const metricsWrong = await requestJson(port, "GET", "/agents/metrics", undefined, {
       requestId: "admin-metrics-wrong",
+      adminApiKey: "wrong-admin-key",
+    });
+    const approvalsWrong = await requestJson(port, "GET", "/agents/approvals", undefined, {
+      requestId: "admin-approvals-wrong",
       adminApiKey: "wrong-admin-key",
     });
     const auditCorrect = await requestJson(port, "GET", "/agents/audit", undefined, {
@@ -1564,13 +1727,19 @@ test("configured admin key protects audit, dashboard, and metrics endpoints", as
       requestId: "admin-metrics-correct",
       adminApiKey: "test-admin-key",
     });
+    const approvalsCorrect = await requestJson(port, "GET", "/agents/approvals", undefined, {
+      requestId: "admin-approvals-correct",
+      adminApiKey: "test-admin-key",
+    });
 
     assertStructuredError(auditMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-audit-missing");
     assertStructuredError(dashboardMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-dashboard-missing");
     assertStructuredError(metricsMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-metrics-missing");
+    assertStructuredError(approvalsMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-approvals-missing");
     assertStructuredError(auditWrong, 403, "ADMIN_AUTH_INVALID", "admin-audit-wrong");
     assertStructuredError(dashboardWrong, 403, "ADMIN_AUTH_INVALID", "admin-dashboard-wrong");
     assertStructuredError(metricsWrong, 403, "ADMIN_AUTH_INVALID", "admin-metrics-wrong");
+    assertStructuredError(approvalsWrong, 403, "ADMIN_AUTH_INVALID", "admin-approvals-wrong");
 
     assert.equal(auditCorrect.statusCode, 200);
     assertJsonResponse(auditCorrect);
@@ -1587,6 +1756,12 @@ test("configured admin key protects audit, dashboard, and metrics endpoints", as
     assertRequestIdHeader(metricsCorrect, "admin-metrics-correct");
     const metricsBody = JSON.parse(metricsCorrect.body) as Record<string, unknown>;
     assertMetricsShape(metricsBody.metrics);
+
+    assert.equal(approvalsCorrect.statusCode, 200);
+    assertJsonResponse(approvalsCorrect);
+    assertRequestIdHeader(approvalsCorrect, "admin-approvals-correct");
+    const approvalsBody = JSON.parse(approvalsCorrect.body) as Record<string, unknown>;
+    assert.ok(Array.isArray(approvalsBody.approvals));
   } finally {
     await closeServer();
     clearApiAuditEvents();
@@ -1596,7 +1771,7 @@ test("configured admin key protects audit, dashboard, and metrics endpoints", as
   }
 });
 
-test("production mode fails closed for admin visibility and metrics endpoints without configured key", async () => {
+test("production mode fails closed for admin visibility, metrics, and approvals endpoints without configured key", async () => {
   const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
   const originalNodeEnv = process.env.NODE_ENV;
   delete process.env.SOVEREIGN_ADMIN_API_KEY;
@@ -1616,10 +1791,14 @@ test("production mode fails closed for admin visibility and metrics endpoints wi
     const metrics = await requestJson(port, "GET", "/agents/metrics", undefined, {
       requestId: "prod-metrics-request",
     });
+    const approvals = await requestJson(port, "GET", "/agents/approvals", undefined, {
+      requestId: "prod-approvals-request",
+    });
 
     assertStructuredError(audit, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-audit-request");
     assertStructuredError(dashboard, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-dashboard-request");
     assertStructuredError(metrics, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-metrics-request");
+    assertStructuredError(approvals, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-approvals-request");
   } finally {
     await closeServer();
     clearApiAuditEvents();

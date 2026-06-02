@@ -5,6 +5,7 @@ export type ApiTelemetryEventType =
   | "advisor.route"
   | "advisor.execute"
   | "skill.execute"
+  | "approval.decision"
   | "api.error";
 
 export type ApiTelemetryEvent = {
@@ -51,6 +52,7 @@ export type ApiMetricsSnapshot = {
     advisorRouteCount: number;
     advisorExecuteCount: number;
     skillExecuteCount: number;
+    approvalDecisionCount: number;
     apiErrorCount: number;
   };
   telemetry: {
@@ -190,6 +192,7 @@ export function getApiMetricsSnapshot(): ApiMetricsSnapshot {
       advisorRouteCount: auditEvents.filter((event) => event.eventType === "advisor.route").length,
       advisorExecuteCount: auditEvents.filter((event) => event.eventType === "advisor.execute").length,
       skillExecuteCount: auditEvents.filter((event) => event.eventType === "skill.execute").length,
+      approvalDecisionCount: auditEvents.filter((event) => event.eventType === "approval.decision").length,
       apiErrorCount: auditEvents.filter((event) => event.eventType === "api.error").length,
     },
     telemetry: {

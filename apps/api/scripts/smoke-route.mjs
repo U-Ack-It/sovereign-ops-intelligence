@@ -7,6 +7,7 @@ const SKILL_EXECUTE_PATH = "/agents/skills/execute";
 const AUDIT_PATH = "/agents/audit";
 const DASHBOARD_PATH = "/agents/dashboard";
 const METRICS_PATH = "/agents/metrics";
+const APPROVALS_PATH = "/agents/approvals";
 const host = "127.0.0.1";
 let port = 0;
 
@@ -78,6 +79,15 @@ function postJson(path, payload) {
 }
 
 function postRaw(path, body, contentType) {
+  const headers = {
+    "content-type": contentType,
+    "content-length": Buffer.byteLength(body),
+    "x-request-id": `smoke-${path.replaceAll("/", "-")}`,
+  };
+
+  if (process.env.SOVEREIGN_ADMIN_API_KEY && path.startsWith(APPROVALS_PATH)) {
+    headers["x-admin-api-key"] = process.env.SOVEREIGN_ADMIN_API_KEY;
+  }
 
   return new Promise((resolve, reject) => {
     const request = http.request(
@@ -86,11 +96,7 @@ function postRaw(path, body, contentType) {
         port,
         path,
         method: "POST",
-        headers: {
-          "content-type": contentType,
-          "content-length": Buffer.byteLength(body),
-          "x-request-id": `smoke-${path.replaceAll("/", "-")}`,
-        },
+        headers,
       },
       (response) => {
         let responseBody = "";
@@ -120,7 +126,8 @@ function getJson(path) {
     process.env.SOVEREIGN_ADMIN_API_KEY &&
     (path.startsWith(AUDIT_PATH) ||
       path.startsWith(DASHBOARD_PATH) ||
-      path.startsWith(METRICS_PATH))
+      path.startsWith(METRICS_PATH) ||
+      path.startsWith(APPROVALS_PATH))
   ) {
     headers["x-admin-api-key"] = process.env.SOVEREIGN_ADMIN_API_KEY;
   }
@@ -376,6 +383,52 @@ async function assertDashboardEndpoint() {
   );
 }
 
+async function assertApprovalDecisionEndpoint() {
+  const approvalResponse = await postSkillExecution({
+    skillId: "access_review",
+    context: {
+      message: "Review password access for the gate system.",
+      urgency: "medium",
+    },
+  });
+
+  assert(
+    approvalResponse.statusCode === 409,
+    `/agents/approvals: expected approval-required HTTP 409, got ${approvalResponse.statusCode}`,
+  );
+
+  const approvalParsed = JSON.parse(approvalResponse.body);
+  assert(approvalParsed.error, "/agents/approvals: expected approval error");
+  assert(
+    approvalParsed.error.code === "ACTION_REQUIRES_APPROVAL",
+    "/agents/approvals: expected ACTION_REQUIRES_APPROVAL",
+  );
+  assert(approvalParsed.error.details.approval.id, "/agents/approvals: expected approval id");
+  const approvalId = approvalParsed.error.details.approval.id;
+
+  const decisionResponse = await postJson(`${APPROVALS_PATH}/${approvalId}/approve`, {
+    reason: "Approved for smoke test; do not execute deferred action.",
+  });
+  assert(
+    decisionResponse.statusCode === 200,
+    `/agents/approvals approve: expected HTTP 200, got ${decisionResponse.statusCode}`,
+  );
+
+  const decisionParsed = JSON.parse(decisionResponse.body);
+  assert(decisionParsed.approval, "/agents/approvals approve: expected approval");
+  assert(decisionParsed.approval.status === "approved", "/agents/approvals approve: expected approved status");
+  assert(decisionParsed.execution.status === "not_executed", "/agents/approvals approve: expected no execution");
+
+  const listResponse = await getJson(`${APPROVALS_PATH}?limit=1`);
+  assert(
+    listResponse.statusCode === 200,
+    `/agents/approvals list: expected HTTP 200, got ${listResponse.statusCode}`,
+  );
+  const listParsed = JSON.parse(listResponse.body);
+  assert(Array.isArray(listParsed.approvals), "/agents/approvals list: expected approvals array");
+  assert(listParsed.approvals.length === 1, "/agents/approvals list: expected one approval");
+}
+
 async function assertMetricsEndpoint() {
   const response = await getJson(METRICS_PATH);
 
@@ -461,6 +514,9 @@ try {
 
   await assertDashboardEndpoint();
   console.log("PASS /agents/dashboard");
+
+  await assertApprovalDecisionEndpoint();
+  console.log("PASS /agents/approvals");
 
   await assertMetricsEndpoint();
   console.log("PASS /agents/metrics");
