@@ -13,6 +13,17 @@ export type AdminAuthResult =
       };
     };
 
+export function parseConfiguredAdminKeys(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 function headerValue(request: IncomingMessage, name: string): string | undefined {
   const value = request.headers[name];
 
@@ -35,9 +46,9 @@ function safeCompare(left: string, right: string): boolean {
 }
 
 export function verifyAdminRequest(request: IncomingMessage): AdminAuthResult {
-  const configuredKey = process.env.SOVEREIGN_ADMIN_API_KEY;
+  const configuredKeys = parseConfiguredAdminKeys(process.env.SOVEREIGN_ADMIN_API_KEY);
 
-  if (!configuredKey) {
+  if (configuredKeys.length === 0) {
     if (process.env.NODE_ENV === "production") {
       return {
         ok: false,
@@ -65,7 +76,7 @@ export function verifyAdminRequest(request: IncomingMessage): AdminAuthResult {
     };
   }
 
-  if (!safeCompare(suppliedKey, configuredKey)) {
+  if (!configuredKeys.some((configuredKey) => safeCompare(suppliedKey, configuredKey))) {
     return {
       ok: false,
       statusCode: 403,

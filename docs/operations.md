@@ -76,6 +76,10 @@ Run with production environment values supplied at runtime. Do not bake secrets 
 - `NODE_ENV=production`
 - `SOVEREIGN_ADMIN_API_KEY`
 
+## Admin Key Rotation
+
+`SOVEREIGN_ADMIN_API_KEY` supports comma-separated active keys. For a rotation window, deploy `old-key,new-key`, update clients to send the new key, then remove the old key. Production config validation checks every configured key entry and does not print key values.
+
 ## Runtime Rate Limit Environment
 
 - `SOVEREIGN_RATE_LIMIT_AGENT_ACTIONS`

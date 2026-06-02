@@ -26,7 +26,7 @@ test("production config check rejects obvious admin keys", () => {
     });
 
     assert.equal(result.ok, false);
-    assert.match(result.message, /too obvious/);
+    assert.match(result.message, /Every SOVEREIGN_ADMIN_API_KEY entry/);
   }
 });
 
@@ -48,4 +48,33 @@ test("production config check accepts a long admin key", () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.skipped, false);
+});
+
+test("production config check accepts rotated admin keys", () => {
+  const result = validateProductionConfig({
+    NODE_ENV: "production",
+    SOVEREIGN_ADMIN_API_KEY: "first-long-safe-admin-key-12345, second-long-safe-admin-key-12345",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.skipped, false);
+});
+
+test("production config check rejects any unsafe rotated admin key entry", () => {
+  const obvious = validateProductionConfig({
+    NODE_ENV: "production",
+    SOVEREIGN_ADMIN_API_KEY: "first-long-safe-admin-key-12345, password",
+  });
+  const short = validateProductionConfig({
+    NODE_ENV: "production",
+    SOVEREIGN_ADMIN_API_KEY: "first-long-safe-admin-key-12345, short",
+  });
+
+  assert.equal(obvious.ok, false);
+  assert.match(obvious.message, /Every SOVEREIGN_ADMIN_API_KEY entry/);
+  assert.doesNotMatch(obvious.message, /password|first-long-safe-admin-key/);
+
+  assert.equal(short.ok, false);
+  assert.match(short.message, /at least 24 characters/);
+  assert.doesNotMatch(short.message, /short|first-long-safe-admin-key/);
 });

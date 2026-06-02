@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { IncomingMessage } from "node:http";
 
-import { verifyAdminRequest } from "./admin-auth.js";
+import { parseConfiguredAdminKeys, verifyAdminRequest } from "./admin-auth.js";
 
 function requestWithHeaders(headers: Record<string, string | string[] | undefined>): IncomingMessage {
   return { headers } as IncomingMessage;
@@ -107,6 +107,40 @@ test("admin auth uses the first non-empty admin key header value", () => {
     );
 
     assert.equal(result.ok, true);
+  } finally {
+    restoreEnv("SOVEREIGN_ADMIN_API_KEY", originalAdminKey);
+    restoreEnv("NODE_ENV", originalNodeEnv);
+  }
+});
+
+test("parseConfiguredAdminKeys ignores blank rotation entries", () => {
+  assert.deepEqual(parseConfiguredAdminKeys(" first , , second ,,  "), ["first", "second"]);
+  assert.deepEqual(parseConfiguredAdminKeys(undefined), []);
+});
+
+test("admin auth accepts any configured rotated admin key", () => {
+  const originalAdminKey = process.env.SOVEREIGN_ADMIN_API_KEY;
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  process.env.SOVEREIGN_ADMIN_API_KEY = "old-rotation-key-for-test, current-rotation-key-for-test , next-rotation-key-for-test";
+  process.env.NODE_ENV = "test";
+
+  try {
+    const oldKey = verifyAdminRequest(requestWithHeaders({ "x-admin-api-key": "old-rotation-key-for-test" }));
+    const currentKey = verifyAdminRequest(requestWithHeaders({ "x-admin-api-key": "current-rotation-key-for-test" }));
+    const nextKey = verifyAdminRequest(requestWithHeaders({ "x-admin-api-key": "next-rotation-key-for-test" }));
+    const wrongKey = verifyAdminRequest(requestWithHeaders({ "x-admin-api-key": "wrong-rotation-key-for-test" }));
+
+    assert.equal(oldKey.ok, true);
+    assert.equal(currentKey.ok, true);
+    assert.equal(nextKey.ok, true);
+    assert.equal(wrongKey.ok, false);
+
+    if (!wrongKey.ok) {
+      assert.equal(wrongKey.statusCode, 403);
+      assert.equal(wrongKey.error.code, "ADMIN_AUTH_INVALID");
+      assert.doesNotMatch(wrongKey.error.message, /old-rotation-key|current-rotation-key|next-rotation-key|wrong-rotation-key/);
+    }
   } finally {
     restoreEnv("SOVEREIGN_ADMIN_API_KEY", originalAdminKey);
     restoreEnv("NODE_ENV", originalNodeEnv);

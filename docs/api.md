@@ -31,6 +31,8 @@ When `SOVEREIGN_ADMIN_API_KEY` is configured, protected visibility routes requir
 x-admin-api-key: <configured key>
 ```
 
+Admin key rotation is supported by setting `SOVEREIGN_ADMIN_API_KEY` to comma-separated active keys. The API accepts any configured key and never returns configured key values in responses.
+
 In production, missing admin API key configuration fails closed for protected visibility routes.
 
 ## Request IDs

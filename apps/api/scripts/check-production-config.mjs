@@ -10,6 +10,17 @@ const UNSAFE_ADMIN_KEYS = new Set([
 
 const MIN_ADMIN_KEY_LENGTH = 24;
 
+function parseConfiguredAdminKeys(value) {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
 export function validateProductionConfig(env = process.env) {
   const nodeEnv = env.NODE_ENV ?? "development";
 
@@ -21,9 +32,9 @@ export function validateProductionConfig(env = process.env) {
     };
   }
 
-  const adminKey = env.SOVEREIGN_ADMIN_API_KEY?.trim() ?? "";
+  const adminKeys = parseConfiguredAdminKeys(env.SOVEREIGN_ADMIN_API_KEY);
 
-  if (!adminKey) {
+  if (adminKeys.length === 0) {
     return {
       ok: false,
       skipped: false,
@@ -31,20 +42,22 @@ export function validateProductionConfig(env = process.env) {
     };
   }
 
-  if (UNSAFE_ADMIN_KEYS.has(adminKey.toLowerCase())) {
-    return {
-      ok: false,
-      skipped: false,
-      message: "SOVEREIGN_ADMIN_API_KEY is too obvious for production.",
-    };
-  }
+  for (const adminKey of adminKeys) {
+    if (UNSAFE_ADMIN_KEYS.has(adminKey.toLowerCase())) {
+      return {
+        ok: false,
+        skipped: false,
+        message: "Every SOVEREIGN_ADMIN_API_KEY entry must be safe for production.",
+      };
+    }
 
-  if (adminKey.length < MIN_ADMIN_KEY_LENGTH) {
-    return {
-      ok: false,
-      skipped: false,
-      message: `SOVEREIGN_ADMIN_API_KEY must be at least ${MIN_ADMIN_KEY_LENGTH} characters in production.`,
-    };
+    if (adminKey.length < MIN_ADMIN_KEY_LENGTH) {
+      return {
+        ok: false,
+        skipped: false,
+        message: `Every SOVEREIGN_ADMIN_API_KEY entry must be at least ${MIN_ADMIN_KEY_LENGTH} characters in production.`,
+      };
+    }
   }
 
   return {

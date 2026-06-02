@@ -53,7 +53,7 @@ npm start
 
 - `PORT` - HTTP port for `npm start`. Defaults to `3000`.
 - `NODE_ENV` - set to `production` for production runtime behavior.
-- `SOVEREIGN_ADMIN_API_KEY` - admin key for internal visibility routes.
+- `SOVEREIGN_ADMIN_API_KEY` - admin key for internal visibility routes. Supports comma-separated active keys for rotation.
 - `SOVEREIGN_OTEL_ENABLED` - set to `true` to enable optional OTLP trace export.
 - `OTEL_SERVICE_NAME` - service name for external telemetry. Defaults to `sovereign-ops-api`.
 - `OTEL_EXPORTER_OTLP_ENDPOINT` - OTLP HTTP trace endpoint.
@@ -68,7 +68,7 @@ When `SOVEREIGN_ADMIN_API_KEY` is configured, requests to `GET /agents/audit`, `
 x-admin-api-key: <configured key>
 ```
 
-In production, `SOVEREIGN_ADMIN_API_KEY` must be configured and must not be an obvious placeholder. Run `npm run check:production` before deployment.
+In production, `SOVEREIGN_ADMIN_API_KEY` must be configured and every comma-separated key entry must be long enough and must not be an obvious placeholder. Run `npm run check:production` before deployment. For rotation, deploy `old-key,new-key`, update clients to `new-key`, then remove `old-key`.
 
 `npm run verify:release` runs the documentation metadata check, MCP checks, API verification, and production verification. It requires `SOVEREIGN_ADMIN_API_KEY` to be present because it includes the production configuration gate.
 
