@@ -27,6 +27,14 @@ const PORT = Number(process.env.PORT ?? 3000);
 const MAX_BODY_BYTES = 1_000_000;
 const MAX_ROUTE_INPUT_CHARS = 4_000;
 const SERVICE_NAME = "sovereign-ops-api";
+const SECURITY_RESPONSE_HEADERS: Record<string, string> = {
+  "cache-control": "no-store",
+  "content-security-policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  "cross-origin-resource-policy": "same-origin",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+};
 
 type RouteRequestBody = {
   message: string;
@@ -447,7 +455,10 @@ function sendJson(
   payload: JsonResponse,
   requestId?: string,
 ): void {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    ...SECURITY_RESPONSE_HEADERS,
+    "content-type": "application/json",
+  };
 
   if (requestId) {
     headers["x-request-id"] = requestId;

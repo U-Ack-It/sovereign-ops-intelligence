@@ -181,6 +181,15 @@ function assertStringArray(value: unknown, label: string): asserts value is stri
 
 function assertJsonResponse(response: TestResponse): void {
   assert.match(String(response.headers["content-type"]), /application\/json/);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(
+    response.headers["content-security-policy"],
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  );
+  assert.equal(response.headers["cross-origin-resource-policy"], "same-origin");
+  assert.equal(response.headers["referrer-policy"], "no-referrer");
+  assert.equal(response.headers["x-content-type-options"], "nosniff");
+  assert.equal(response.headers["x-frame-options"], "DENY");
 }
 
 function assertRequestIdHeader(response: TestResponse, expectedRequestId = "test-request-id"): void {
