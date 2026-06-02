@@ -74,6 +74,17 @@ type ListApprovalRecordsOptions = {
   limit?: number;
 };
 
+export type ApprovalSummary = {
+  totalRetained: number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  executedCount: number;
+  expiredCount: number;
+  oldestCreatedAt: string | null;
+  newestCreatedAt: string | null;
+};
+
 const MAX_RETAINED_APPROVALS = 100;
 const DEFAULT_APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 const SENSITIVE_KEY_PATTERN = /authorization|secret|token|password|private|key|otel|header/i;
@@ -247,6 +258,25 @@ export function markApprovalRecordExecuted(id: string, requestId: string): Appro
 export function listApprovalRecords(options: ListApprovalRecordsOptions = {}): ApprovalRecord[] {
   expirePendingApprovalRecords();
   return approvals.slice(0, normalizedLimit(options.limit)).map(cloneApprovalRecord);
+}
+
+export function getApprovalSummary(): ApprovalSummary {
+  expirePendingApprovalRecords();
+  const createdAtValues = approvals
+    .map((record) => record.createdAt)
+    .filter((value) => typeof value === "string" && value.trim())
+    .sort();
+
+  return {
+    totalRetained: approvals.length,
+    pendingCount: approvals.filter((record) => record.status === "pending").length,
+    approvedCount: approvals.filter((record) => record.status === "approved").length,
+    rejectedCount: approvals.filter((record) => record.status === "rejected").length,
+    executedCount: approvals.filter((record) => record.status === "executed").length,
+    expiredCount: approvals.filter((record) => record.status === "expired").length,
+    oldestCreatedAt: createdAtValues[0] ?? null,
+    newestCreatedAt: createdAtValues[createdAtValues.length - 1] ?? null,
+  };
 }
 
 export function getApprovalRecord(id: string): ApprovalRecord | undefined {

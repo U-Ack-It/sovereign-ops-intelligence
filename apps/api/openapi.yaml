@@ -155,6 +155,63 @@ components:
       properties:
         approval:
           $ref: "#/components/schemas/ApprovalRecord"
+    ApprovalSummary:
+      type: object
+      required:
+        - totalRetained
+        - pendingCount
+        - approvedCount
+        - rejectedCount
+        - executedCount
+        - expiredCount
+      properties:
+        totalRetained:
+          type: integer
+        pendingCount:
+          type: integer
+        approvedCount:
+          type: integer
+        rejectedCount:
+          type: integer
+        executedCount:
+          type: integer
+        expiredCount:
+          type: integer
+        oldestCreatedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        newestCreatedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+    ApprovalSummaryResponse:
+      type: object
+      required:
+        - summary
+      properties:
+        summary:
+          $ref: "#/components/schemas/ApprovalSummary"
+    ApprovalExpireResponse:
+      type: object
+      required:
+        - requestId
+        - expiredCount
+        - expiredApprovalIds
+        - summary
+      properties:
+        requestId:
+          type: string
+        expiredCount:
+          type: integer
+        expiredApprovalIds:
+          type: array
+          items:
+            type: string
+        summary:
+          $ref: "#/components/schemas/ApprovalSummary"
     ApprovalDecisionRequest:
       type: object
       properties:
@@ -835,6 +892,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApprovalListResponse"
+        "401":
+          description: Admin API key required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin API key invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/approvals/summary:
+    get:
+      tags: [Admin Visibility]
+      summary: Summarize retained approval records
+      description: Returns safe in-memory approval counts by status. Does not expose raw input or secrets.
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Approval summary.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalSummaryResponse"
+        "401":
+          description: Admin API key required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin API key invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/approvals/expire:
+    post:
+      tags: [Admin Visibility]
+      summary: Expire stale pending approval records
+      description: Explicitly runs the safe in-memory expiration sweep for pending records whose expiration timestamp has passed.
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Expiration sweep result.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalExpireResponse"
         "401":
           description: Admin API key required.
           content:

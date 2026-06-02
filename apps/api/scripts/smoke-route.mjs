@@ -440,6 +440,24 @@ async function assertApprovalDecisionEndpoint() {
   assert(Array.isArray(listParsed.approvals), "/agents/approvals list: expected approvals array");
   assert(listParsed.approvals.length === 1, "/agents/approvals list: expected one approval");
   assert(listParsed.approvals[0].expiresAt, "/agents/approvals list: expected expiresAt");
+
+  const summaryResponse = await getJson(`${APPROVALS_PATH}/summary`);
+  assert(
+    summaryResponse.statusCode === 200,
+    `/agents/approvals summary: expected HTTP 200, got ${summaryResponse.statusCode}`,
+  );
+  const summaryParsed = JSON.parse(summaryResponse.body);
+  assert(summaryParsed.summary, "/agents/approvals summary: expected summary");
+  assert(typeof summaryParsed.summary.totalRetained === "number", "/agents/approvals summary: expected totalRetained");
+
+  const expireResponse = await postJson(`${APPROVALS_PATH}/expire`, {});
+  assert(
+    expireResponse.statusCode === 200,
+    `/agents/approvals expire: expected HTTP 200, got ${expireResponse.statusCode}`,
+  );
+  const expireParsed = JSON.parse(expireResponse.body);
+  assert(typeof expireParsed.expiredCount === "number", "/agents/approvals expire: expected expiredCount");
+  assert(Array.isArray(expireParsed.expiredApprovalIds), "/agents/approvals expire: expected expiredApprovalIds");
 }
 
 async function assertMetricsEndpoint() {

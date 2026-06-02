@@ -4,7 +4,15 @@ import { AddressInfo } from "node:net";
 import { pathToFileURL } from "node:url";
 
 import { evaluateActionPolicy, type ActionPolicyResult } from "./action-policy.js";
-import { createApprovalRecord, decideApprovalRecord, getApprovalRecord, listApprovalRecords, markApprovalRecordExecuted } from "./approvals.js";
+import {
+  createApprovalRecord,
+  decideApprovalRecord,
+  expirePendingApprovalRecords,
+  getApprovalRecord,
+  getApprovalSummary,
+  listApprovalRecords,
+  markApprovalRecordExecuted,
+} from "./approvals.js";
 import { verifyAdminRequest } from "./admin-auth.js";
 import { ApiAuditEventType, ApiAuditStatus, listApiAuditEvents, recordApiAuditEvent } from "./agents/audit-trail.js";
 import { buildAdvisorDashboardSummary } from "./agents/dashboard.js";
@@ -508,6 +516,10 @@ function approvalDecisionFromPath(path: string): "approved" | "rejected" | null 
 
 function isApprovalExecutionPath(path: string): boolean {
   return path.endsWith("/execute");
+}
+
+function isApprovalExpirePath(path: string): boolean {
+  return path === "/agents/approvals/expire";
 }
 
 function approvalResponseDetails(approval: ReturnType<typeof createApprovalRecord>): Record<string, unknown> {
@@ -1088,6 +1100,65 @@ export const server = createServer(async (request, response) => {
         200,
         {
           approvals: listApprovalRecords({ limit: limitFromUrl(request.url) }),
+        },
+        requestId,
+      );
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
+      return;
+    }
+
+    if (request.method === "GET" && requestPath === "/agents/approvals/summary") {
+      const adminAuth = verifyAdminRequest(request);
+
+      if (!adminAuth.ok) {
+        sendError(response, adminAuth.statusCode, adminAuth.error, requestId, {
+          method: request.method ?? "UNKNOWN",
+          route: "/agents/approvals",
+        });
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode, requestStartedAt);
+        return;
+      }
+
+      sendJson(response, 200, { summary: getApprovalSummary() }, requestId);
+      logRequest(requestId, request.method, request.url, 200, requestStartedAt);
+      return;
+    }
+
+    if (request.method === "POST" && isApprovalExpirePath(requestPath)) {
+      const adminAuth = verifyAdminRequest(request);
+
+      if (!adminAuth.ok) {
+        sendError(response, adminAuth.statusCode, adminAuth.error, requestId, {
+          method: request.method ?? "UNKNOWN",
+          route: "/agents/approvals",
+        });
+        logRequest(requestId, request.method, request.url, adminAuth.statusCode, requestStartedAt);
+        return;
+      }
+
+      const expired = expirePendingApprovalRecords();
+
+      for (const approval of expired) {
+        safeRecordApiAuditEvent({
+          requestId,
+          method: request.method ?? "UNKNOWN",
+          route: "/agents/approvals",
+          eventType: "approval.expire",
+          status: "success",
+          advisor: approval.advisor,
+          selectedSkillIds: approval.selectedSkillIds,
+          errorCode: "APPROVAL_EXPIRED",
+        });
+      }
+
+      sendJson(
+        response,
+        200,
+        {
+          requestId,
+          expiredCount: expired.length,
+          expiredApprovalIds: expired.map((approval) => approval.id),
+          summary: getApprovalSummary(),
         },
         requestId,
       );

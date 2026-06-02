@@ -338,6 +338,18 @@ function assertApprovalRecordShape(value: unknown): void {
   }
 }
 
+function assertApprovalSummaryShape(value: unknown): void {
+  assertJsonObject(value, "approval summary");
+  assert.equal(typeof value.totalRetained, "number");
+  assert.equal(typeof value.pendingCount, "number");
+  assert.equal(typeof value.approvedCount, "number");
+  assert.equal(typeof value.rejectedCount, "number");
+  assert.equal(typeof value.executedCount, "number");
+  assert.equal(typeof value.expiredCount, "number");
+  assert.ok(value.oldestCreatedAt === null || typeof value.oldestCreatedAt === "string");
+  assert.ok(value.newestCreatedAt === null || typeof value.newestCreatedAt === "string");
+}
+
 function assertActionPolicyShape(value: unknown, expectedDecision?: string): void {  assertJsonObject(value, "actionPolicy");
   assert.ok(
     ["allow", "deny", "requires_approval", "audit_only"].includes(String(value.decision)),
@@ -1251,6 +1263,81 @@ test("expired approval records cannot be decided or executed", async () => {
   }
 });
 
+test("approval maintenance endpoints summarize and expire stale pending records", async () => {
+  clearApiAuditEvents();
+  clearApprovalRecords();
+  const port = await listenForTest();
+
+  try {
+    createApprovalRecord({
+      requestId: "maintenance-pending-create",
+      method: "POST",
+      route: "/agents/execute",
+      advisor: "Security Advisor",
+      category: "passwords/access/security",
+      skillId: "access_review",
+      selectedSkillIds: ["access_review"],
+      policyReason: "Access-sensitive action requires approval.",
+      matchedTerms: ["access"],
+      message: "Review gate access for tomorrow.",
+      context: { property: "Miami residence" },
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    createApprovalRecord({
+      requestId: "maintenance-expired-create",
+      method: "POST",
+      route: "/agents/skills/execute",
+      skillId: "contract_risk_scan",
+      selectedSkillIds: ["contract_risk_scan"],
+      policyReason: "Contract-sensitive action requires approval.",
+      matchedTerms: ["contract"],
+      message: "Review vendor contract before signing.",
+      context: { secretToken: "must-not-be-stored" },
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    const expireResponse = await requestJson(port, "POST", "/agents/approvals/expire", undefined, {
+      requestId: "maintenance-expire-request",
+    });
+    assert.equal(expireResponse.statusCode, 200);
+    assertJsonResponse(expireResponse);
+    assertRequestIdHeader(expireResponse, "maintenance-expire-request");
+    const expireBody = JSON.parse(expireResponse.body) as Record<string, unknown>;
+    assert.equal(expireBody.requestId, "maintenance-expire-request");
+    assert.equal(expireBody.expiredCount, 1);
+    assert.ok(Array.isArray(expireBody.expiredApprovalIds));
+    assert.equal(expireBody.expiredApprovalIds.length, 1);
+    assertApprovalSummaryShape(expireBody.summary);
+    assertJsonObject(expireBody.summary, "expire summary");
+    assert.equal(expireBody.summary.totalRetained, 2);
+    assert.equal(expireBody.summary.pendingCount, 1);
+    assert.equal(expireBody.summary.expiredCount, 1);
+
+    const summaryResponse = await requestJson(port, "GET", "/agents/approvals/summary", undefined, {
+      requestId: "maintenance-summary-request",
+    });
+    assert.equal(summaryResponse.statusCode, 200);
+    assertJsonResponse(summaryResponse);
+    assertRequestIdHeader(summaryResponse, "maintenance-summary-request");
+    const summaryBody = JSON.parse(summaryResponse.body) as Record<string, unknown>;
+    assertApprovalSummaryShape(summaryBody.summary);
+    assertJsonObject(summaryBody.summary, "approval summary body");
+    assert.equal(summaryBody.summary.totalRetained, 2);
+    assert.equal(summaryBody.summary.pendingCount, 1);
+    assert.equal(summaryBody.summary.expiredCount, 1);
+
+    const serialized = `${expireResponse.body} ${summaryResponse.body} ${JSON.stringify(listApprovalRecords({ limit: 10 }))}`;
+    assert.doesNotMatch(serialized, /must-not-be-stored|secretToken/i);
+
+    const auditEvents = listApiAuditEvents({ limit: 20 });
+    assert.ok(auditEvents.some((event) => event.eventType === "approval.expire" && event.requestId === "maintenance-expire-request"));
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+    clearApprovalRecords();
+  }
+});
+
 test("action policy allows safe generic skill execution", async () => {
   const port = await listenForTest();
 
@@ -1848,6 +1935,9 @@ test("admin visibility endpoints stay open in local mode when no admin key is co
     const approvals = await requestJson(port, "GET", "/agents/approvals", undefined, {
       requestId: "local-approvals-request",
     });
+    const approvalSummary = await requestJson(port, "GET", "/agents/approvals/summary", undefined, {
+      requestId: "local-approvals-summary-request",
+    });
 
     assert.equal(audit.statusCode, 200);
     assertJsonResponse(audit);
@@ -1868,6 +1958,12 @@ test("admin visibility endpoints stay open in local mode when no admin key is co
     assertRequestIdHeader(approvals, "local-approvals-request");
     const approvalsBody = JSON.parse(approvals.body) as Record<string, unknown>;
     assert.ok(Array.isArray(approvalsBody.approvals));
+
+    assert.equal(approvalSummary.statusCode, 200);
+    assertJsonResponse(approvalSummary);
+    assertRequestIdHeader(approvalSummary, "local-approvals-summary-request");
+    const approvalSummaryBody = JSON.parse(approvalSummary.body) as Record<string, unknown>;
+    assertApprovalSummaryShape(approvalSummaryBody.summary);
   } finally {
     await closeServer();
     clearApiAuditEvents();
@@ -1900,6 +1996,9 @@ test("configured admin key protects audit, dashboard, metrics, and approvals end
     const approvalsMissing = await requestJson(port, "GET", "/agents/approvals", undefined, {
       requestId: "admin-approvals-missing",
     });
+    const approvalSummaryMissing = await requestJson(port, "GET", "/agents/approvals/summary", undefined, {
+      requestId: "admin-approvals-summary-missing",
+    });
     const auditWrong = await requestJson(port, "GET", "/agents/audit", undefined, {
       requestId: "admin-audit-wrong",
       adminApiKey: "wrong-admin-key",
@@ -1914,6 +2013,10 @@ test("configured admin key protects audit, dashboard, metrics, and approvals end
     });
     const approvalsWrong = await requestJson(port, "GET", "/agents/approvals", undefined, {
       requestId: "admin-approvals-wrong",
+      adminApiKey: "wrong-admin-key",
+    });
+    const approvalExpireWrong = await requestJson(port, "POST", "/agents/approvals/expire", undefined, {
+      requestId: "admin-approvals-expire-wrong",
       adminApiKey: "wrong-admin-key",
     });
     const auditCorrect = await requestJson(port, "GET", "/agents/audit", undefined, {
@@ -1932,15 +2035,25 @@ test("configured admin key protects audit, dashboard, metrics, and approvals end
       requestId: "admin-approvals-correct",
       adminApiKey: "test-admin-key",
     });
+    const approvalSummaryCorrect = await requestJson(port, "GET", "/agents/approvals/summary", undefined, {
+      requestId: "admin-approvals-summary-correct",
+      adminApiKey: "test-admin-key",
+    });
+    const approvalExpireCorrect = await requestJson(port, "POST", "/agents/approvals/expire", undefined, {
+      requestId: "admin-approvals-expire-correct",
+      adminApiKey: "test-admin-key",
+    });
 
     assertStructuredError(auditMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-audit-missing");
     assertStructuredError(dashboardMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-dashboard-missing");
     assertStructuredError(metricsMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-metrics-missing");
     assertStructuredError(approvalsMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-approvals-missing");
+    assertStructuredError(approvalSummaryMissing, 401, "ADMIN_AUTH_REQUIRED", "admin-approvals-summary-missing");
     assertStructuredError(auditWrong, 403, "ADMIN_AUTH_INVALID", "admin-audit-wrong");
     assertStructuredError(dashboardWrong, 403, "ADMIN_AUTH_INVALID", "admin-dashboard-wrong");
     assertStructuredError(metricsWrong, 403, "ADMIN_AUTH_INVALID", "admin-metrics-wrong");
     assertStructuredError(approvalsWrong, 403, "ADMIN_AUTH_INVALID", "admin-approvals-wrong");
+    assertStructuredError(approvalExpireWrong, 403, "ADMIN_AUTH_INVALID", "admin-approvals-expire-wrong");
 
     assert.equal(auditCorrect.statusCode, 200);
     assertJsonResponse(auditCorrect);
@@ -1963,6 +2076,16 @@ test("configured admin key protects audit, dashboard, metrics, and approvals end
     assertRequestIdHeader(approvalsCorrect, "admin-approvals-correct");
     const approvalsBody = JSON.parse(approvalsCorrect.body) as Record<string, unknown>;
     assert.ok(Array.isArray(approvalsBody.approvals));
+
+    assert.equal(approvalSummaryCorrect.statusCode, 200);
+    assertJsonResponse(approvalSummaryCorrect);
+    assertRequestIdHeader(approvalSummaryCorrect, "admin-approvals-summary-correct");
+    const approvalSummaryBody = JSON.parse(approvalSummaryCorrect.body) as Record<string, unknown>;
+    assertApprovalSummaryShape(approvalSummaryBody.summary);
+
+    assert.equal(approvalExpireCorrect.statusCode, 200);
+    assertJsonResponse(approvalExpireCorrect);
+    assertRequestIdHeader(approvalExpireCorrect, "admin-approvals-expire-correct");
   } finally {
     await closeServer();
     clearApiAuditEvents();
@@ -1995,11 +2118,19 @@ test("production mode fails closed for admin visibility, metrics, and approvals 
     const approvals = await requestJson(port, "GET", "/agents/approvals", undefined, {
       requestId: "prod-approvals-request",
     });
+    const approvalSummary = await requestJson(port, "GET", "/agents/approvals/summary", undefined, {
+      requestId: "prod-approvals-summary-request",
+    });
+    const approvalExpire = await requestJson(port, "POST", "/agents/approvals/expire", undefined, {
+      requestId: "prod-approvals-expire-request",
+    });
 
     assertStructuredError(audit, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-audit-request");
     assertStructuredError(dashboard, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-dashboard-request");
     assertStructuredError(metrics, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-metrics-request");
     assertStructuredError(approvals, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-approvals-request");
+    assertStructuredError(approvalSummary, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-approvals-summary-request");
+    assertStructuredError(approvalExpire, 503, "ADMIN_AUTH_NOT_CONFIGURED", "prod-approvals-expire-request");
   } finally {
     await closeServer();
     clearApiAuditEvents();
