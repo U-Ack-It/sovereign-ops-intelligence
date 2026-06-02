@@ -69,6 +69,8 @@ In production, `SOVEREIGN_ADMIN_API_KEY` must be configured and must not be an o
 
 `npm run verify:release` runs the documentation metadata check, MCP checks, API verification, and production verification. It requires `SOVEREIGN_ADMIN_API_KEY` to be present because it includes the production configuration gate.
 
+`npm run ci:check` verifies that `.github/workflows/api-stability.yml` runs `verify:release` with the required CI admin key environment and that the release script still includes docs, OpenAPI, MCP, normal API, and production checks.
+
 `npm run openapi:check` verifies that server routes are represented in `apps/api/openapi.yaml` and that admin-only paths declare `ApiKeyAuth`.
 
 ## Response Security
