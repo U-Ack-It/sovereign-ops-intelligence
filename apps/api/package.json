@@ -30,7 +30,8 @@
     "verify:guardian": "npm run verify && npm run guardian",
     "verify:mcp": "npm run mcp:check && npm run mcp:policy:check && npm run mcp:manifest:check",
     "verify:production": "npm run build && NODE_ENV=production npm run check:production && NODE_ENV=test SOVEREIGN_ADMIN_API_KEY= npm run sentinel && npm run smoke:production",
-    "verify:sentinel": "npm run verify && npm run sentinel"
+    "verify:sentinel": "npm run verify && npm run sentinel",
+    "verify:release": "npm run docs:check && npm run verify:mcp && SOVEREIGN_ADMIN_API_KEY= npm run verify && npm run verify:production"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",

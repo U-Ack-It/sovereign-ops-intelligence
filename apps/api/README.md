@@ -29,6 +29,7 @@ npm run build
 npm test
 npm run smoke:route
 npm run sentinel
+npm run verify:release
 ```
 
 ## Production Commands
@@ -36,6 +37,7 @@ npm run sentinel
 ```sh
 npm run check:production
 npm run verify:production
+npm run verify:release
 npm run smoke:production
 npm start
 ```
@@ -64,6 +66,8 @@ x-admin-api-key: <configured key>
 ```
 
 In production, `SOVEREIGN_ADMIN_API_KEY` must be configured and must not be an obvious placeholder. Run `npm run check:production` before deployment.
+
+`npm run verify:release` runs the documentation metadata check, MCP checks, API verification, and production verification. It requires `SOVEREIGN_ADMIN_API_KEY` to be present because it includes the production configuration gate.
 
 ## Response Security
 

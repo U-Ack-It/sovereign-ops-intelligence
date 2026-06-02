@@ -36,8 +36,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run Bug Sentinel
-        run: npm run sentinel
+      - name: Run release verification
+        env:
+          SOVEREIGN_ADMIN_API_KEY: ci-release-verification-admin-key-12345
+        run: npm run verify:release
 
       - name: Upload Bug Sentinel artifacts
         if: always()
