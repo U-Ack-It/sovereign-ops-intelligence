@@ -107,4 +107,4 @@ The integrity check compares the live deterministic manifest output against `app
 
 ## Approval Decisions
 
-`requires_approval` actions create in-memory approval records and do not execute. Admin-protected approval decision endpoints can mark records as approved or rejected, but the current baseline records the decision only and does not execute deferred actions automatically. Approval records store safe metadata, digests, lengths, and safe context keys rather than raw input, authorization headers, secrets, tokens, passwords, private keys, or OTLP values.
+`requires_approval` actions create in-memory approval records and do not execute. Admin-protected approval decision endpoints can mark records as approved or rejected, but the current baseline records the decision only and does not execute deferred actions automatically. Pending approval records expire after 24 hours; expired records are terminal and cannot be approved, rejected, or executed. Approval records store safe metadata, digests, lengths, and safe context keys rather than raw input, authorization headers, secrets, tokens, passwords, private keys, or OTLP values.

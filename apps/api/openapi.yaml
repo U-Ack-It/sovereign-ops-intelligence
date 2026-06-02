@@ -49,6 +49,7 @@ components:
         - id
         - requestId
         - createdAt
+        - expiresAt
         - status
         - method
         - route
@@ -68,9 +69,13 @@ components:
         createdAt:
           type: string
           format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: Pending approval expiration timestamp. Expired records cannot be decided or executed.
         status:
           type: string
-          enum: [pending, approved, rejected, executed]
+          enum: [pending, approved, rejected, executed, expired]
         method:
           type: string
         route:
@@ -131,6 +136,9 @@ components:
         executionMode:
           type: string
           enum: [dry_run]
+        expiredAt:
+          type: string
+          format: date-time
     ApprovalListResponse:
       type: object
       required:
@@ -559,7 +567,7 @@ components:
           type: string
         eventType:
           type: string
-          enum: [advisor.route, advisor.execute, skill.execute, approval.decision, api.error]
+          enum: [advisor.route, advisor.execute, skill.execute, approval.decision, approval.execute, approval.expire, api.error]
         status:
           type: string
           enum: [success, error]
@@ -871,7 +879,7 @@ paths:
     post:
       tags: [Admin Visibility]
       summary: Approve a pending approval record
-      description: Records the approval decision only. Deferred action execution is not enabled in this baseline.
+      description: Records the approval decision only. Expired approval records cannot be changed.
       security:
         - ApiKeyAuth: []
       parameters:
@@ -894,7 +902,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApprovalDecisionResponse"
         "409":
-          description: Approval was already decided.
+          description: Approval was already decided or expired.
           content:
             application/json:
               schema:
@@ -903,7 +911,7 @@ paths:
     post:
       tags: [Admin Visibility]
       summary: Reject a pending approval record
-      description: Records the rejection decision only. Deferred action execution is not enabled in this baseline.
+      description: Records the rejection decision only. Expired approval records cannot be changed.
       security:
         - ApiKeyAuth: []
       parameters:
@@ -926,7 +934,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApprovalDecisionResponse"
         "409":
-          description: Approval was already decided.
+          description: Approval was already decided or expired.
           content:
             application/json:
               schema:
@@ -952,7 +960,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApprovalExecutionResponse"
         "409":
-          description: Approval is not approved or was already executed.
+          description: Approval is not approved, already executed, or expired.
           content:
             application/json:
               schema:

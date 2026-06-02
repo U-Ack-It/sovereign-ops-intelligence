@@ -4,6 +4,7 @@ export type ApiAuditEventType =
   | "skill.execute"
   | "approval.decision"
   | "approval.execute"
+  | "approval.expire"
   | "api.error";
 
 export type ApiAuditStatus = "success" | "error";

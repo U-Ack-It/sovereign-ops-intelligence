@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 
-export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed" | "expired";
 export type ApprovalDecision = "approved" | "rejected";
 
 export type ApprovalRecord = {
   id: string;
   requestId: string;
   createdAt: string;
+  expiresAt: string;
   status: ApprovalStatus;
   method: string;
   route: "/agents/execute" | "/agents/skills/execute";
@@ -29,6 +30,7 @@ export type ApprovalRecord = {
   executedAt?: string;
   executionRequestId?: string;
   executionMode?: "dry_run";
+  expiredAt?: string;
 };
 
 type CreateApprovalRecordInput = {
@@ -43,6 +45,7 @@ type CreateApprovalRecordInput = {
   matchedTerms?: string[];
   message?: string;
   context?: Record<string, unknown>;
+  expiresAt?: string;
 };
 
 type DecideApprovalRecordInput = {
@@ -53,7 +56,7 @@ type DecideApprovalRecordInput = {
 
 type ApprovalDecisionResult =
   | { ok: true; approval: ApprovalRecord }
-  | { ok: false; code: "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_DECIDED"; approval?: ApprovalRecord };
+  | { ok: false; code: "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_DECIDED" | "APPROVAL_EXPIRED"; approval?: ApprovalRecord };
 
 type ApprovalExecutionResult =
   | { ok: true; approval: ApprovalRecord }
@@ -62,7 +65,8 @@ type ApprovalExecutionResult =
       code:
         | "APPROVAL_NOT_FOUND"
         | "APPROVAL_NOT_APPROVED"
-        | "APPROVAL_ALREADY_EXECUTED";
+        | "APPROVAL_ALREADY_EXECUTED"
+        | "APPROVAL_EXPIRED";
       approval?: ApprovalRecord;
     };
 
@@ -71,6 +75,7 @@ type ListApprovalRecordsOptions = {
 };
 
 const MAX_RETAINED_APPROVALS = 100;
+const DEFAULT_APPROVAL_TTL_MS = 24 * 60 * 60 * 1000;
 const SENSITIVE_KEY_PATTERN = /authorization|secret|token|password|private|key|otel|header/i;
 
 let nextApprovalId = 1;
@@ -129,12 +134,36 @@ function approvalById(id: string): ApprovalRecord | undefined {
   return approvals.find((item) => item.id === id);
 }
 
+function defaultExpiresAt(): string {
+  return new Date(Date.now() + DEFAULT_APPROVAL_TTL_MS).toISOString();
+}
+
+function isExpired(record: ApprovalRecord, nowMs: number): boolean {
+  return record.status === "pending" && Date.parse(record.expiresAt) <= nowMs;
+}
+
+export function expirePendingApprovalRecords(nowMs: number = Date.now()): ApprovalRecord[] {
+  const expired: ApprovalRecord[] = [];
+  const expiredAt = new Date(nowMs).toISOString();
+
+  for (const record of approvals) {
+    if (isExpired(record, nowMs)) {
+      record.status = "expired";
+      record.expiredAt = expiredAt;
+      expired.push(cloneApprovalRecord(record));
+    }
+  }
+
+  return expired;
+}
+
 export function createApprovalRecord(input: CreateApprovalRecordInput): ApprovalRecord {
   const message = normalizedText(input.message);
   const record: ApprovalRecord = {
     id: `approval_${nextApprovalId++}`,
     requestId: input.requestId,
     createdAt: new Date().toISOString(),
+    expiresAt: input.expiresAt ?? defaultExpiresAt(),
     status: "pending",
     method: input.method,
     route: input.route,
@@ -161,10 +190,15 @@ export function createApprovalRecord(input: CreateApprovalRecordInput): Approval
 }
 
 export function decideApprovalRecord(id: string, input: DecideApprovalRecordInput): ApprovalDecisionResult {
+  expirePendingApprovalRecords();
   const record = approvalById(id);
 
   if (!record) {
     return { ok: false, code: "APPROVAL_NOT_FOUND" };
+  }
+
+  if (record.status === "expired") {
+    return { ok: false, code: "APPROVAL_EXPIRED", approval: cloneApprovalRecord(record) };
   }
 
   if (record.status !== "pending") {
@@ -183,6 +217,7 @@ export function decideApprovalRecord(id: string, input: DecideApprovalRecordInpu
 }
 
 export function markApprovalRecordExecuted(id: string, requestId: string): ApprovalExecutionResult {
+  expirePendingApprovalRecords();
   const record = approvalById(id);
 
   if (!record) {
@@ -191,6 +226,10 @@ export function markApprovalRecordExecuted(id: string, requestId: string): Appro
 
   if (record.status === "executed") {
     return { ok: false, code: "APPROVAL_ALREADY_EXECUTED", approval: cloneApprovalRecord(record) };
+  }
+
+  if (record.status === "expired") {
+    return { ok: false, code: "APPROVAL_EXPIRED", approval: cloneApprovalRecord(record) };
   }
 
   if (record.status !== "approved") {
@@ -206,10 +245,12 @@ export function markApprovalRecordExecuted(id: string, requestId: string): Appro
 }
 
 export function listApprovalRecords(options: ListApprovalRecordsOptions = {}): ApprovalRecord[] {
+  expirePendingApprovalRecords();
   return approvals.slice(0, normalizedLimit(options.limit)).map(cloneApprovalRecord);
 }
 
 export function getApprovalRecord(id: string): ApprovalRecord | undefined {
+  expirePendingApprovalRecords();
   const record = approvalById(id);
 
   if (!record) {

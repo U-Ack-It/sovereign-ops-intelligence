@@ -515,7 +515,9 @@ function approvalResponseDetails(approval: ReturnType<typeof createApprovalRecor
     id: approval.id,
     status: approval.status,
     createdAt: approval.createdAt,
+    expiresAt: approval.expiresAt,
     decidedAt: approval.decidedAt,
+    expiredAt: approval.expiredAt,
     route: approval.route,
     advisor: approval.advisor,
     category: approval.category,
@@ -526,6 +528,26 @@ function approvalResponseDetails(approval: ReturnType<typeof createApprovalRecor
     executionRequestId: approval.executionRequestId,
     executionMode: approval.executionMode,
   };
+}
+
+function approvalErrorMessage(code: string): string {
+  if (code === "APPROVAL_NOT_FOUND") {
+    return "Approval record was not found.";
+  }
+
+  if (code === "APPROVAL_ALREADY_EXECUTED") {
+    return "Approval record has already been executed.";
+  }
+
+  if (code === "APPROVAL_EXPIRED") {
+    return "Approval record has expired and cannot be changed or executed.";
+  }
+
+  if (code === "APPROVAL_NOT_APPROVED") {
+    return "Approval record must be approved before execution.";
+  }
+
+  return "Approval record has already been decided.";
 }
 
 function actionPolicyResponse(policy: ActionPolicyResult): { statusCode: number; error: ParsedError } | null {
@@ -739,17 +761,26 @@ async function handleApprovalExecution(
 
   if (!result.ok) {
     const statusCode = result.code === "APPROVAL_NOT_FOUND" ? 404 : 409;
+
+    if (result.code === "APPROVAL_EXPIRED" && result.approval) {
+      safeRecordApiAuditEvent({
+        requestId,
+        method: auditContext.method,
+        route: auditContext.route,
+        eventType: "approval.expire",
+        status: "success",
+        advisor: result.approval.advisor,
+        selectedSkillIds: result.approval.selectedSkillIds,
+        errorCode: "APPROVAL_EXPIRED",
+      });
+    }
+
     sendError(
       response,
       statusCode,
       {
         code: result.code,
-        message:
-          result.code === "APPROVAL_NOT_FOUND"
-            ? "Approval record was not found."
-            : result.code === "APPROVAL_ALREADY_EXECUTED"
-              ? "Approval record has already been executed."
-              : "Approval record must be approved before execution.",
+        message: approvalErrorMessage(result.code),
         details: result.approval ? { approval: approvalResponseDetails(result.approval) } : {},
       },
       requestId,
@@ -815,15 +846,26 @@ async function handleApprovalDecision(
 
   if (!result.ok) {
     const statusCode = result.code === "APPROVAL_NOT_FOUND" ? 404 : 409;
+
+    if (result.code === "APPROVAL_EXPIRED" && result.approval) {
+      safeRecordApiAuditEvent({
+        requestId,
+        method: auditContext.method,
+        route: auditContext.route,
+        eventType: "approval.expire",
+        status: "success",
+        advisor: result.approval.advisor,
+        selectedSkillIds: result.approval.selectedSkillIds,
+        errorCode: "APPROVAL_EXPIRED",
+      });
+    }
+
     sendError(
       response,
       statusCode,
       {
         code: result.code,
-        message:
-          result.code === "APPROVAL_NOT_FOUND"
-            ? "Approval record was not found."
-            : "Approval record has already been decided.",
+        message: approvalErrorMessage(result.code),
         details: result.approval ? { approval: approvalResponseDetails(result.approval) } : {},
       },
       requestId,

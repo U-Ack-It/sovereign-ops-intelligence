@@ -4,7 +4,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { clearApiAuditEvents, listApiAuditEvents } from "./agents/audit-trail.js";
-import { clearApprovalRecords, listApprovalRecords } from "./approvals.js";
+import { clearApprovalRecords, createApprovalRecord, listApprovalRecords } from "./approvals.js";
 import { recordTelemetryEvent, registerTelemetrySink, resetApiMetrics } from "./observability.js";
 import { parseRouteRequestBody, server } from "./server.js";
 
@@ -300,8 +300,9 @@ function assertApprovalRecordShape(value: unknown): void {
   assertString(value.id, "approval.id");
   assertString(value.requestId, "approval.requestId");
   assertString(value.createdAt, "approval.createdAt");
-  assert.ok(["pending", "approved", "rejected", "executed"].includes(String(value.status)), "approval.status should be known");
+  assert.ok(["pending", "approved", "rejected", "executed", "expired"].includes(String(value.status)), "approval.status should be known");
   assertString(value.method, "approval.method");
+  assertString(value.expiresAt, "approval.expiresAt");
   assert.ok(["/agents/execute", "/agents/skills/execute"].includes(String(value.route)));
   assert.equal(value.policyDecision, "requires_approval");
   assertString(value.policyReason, "approval.policyReason");
@@ -317,7 +318,7 @@ function assertApprovalRecordShape(value: unknown): void {
     assertStringArray(value.selectedSkillIds, "approval.selectedSkillIds");
   }
 
-  if (value.status !== "pending") {
+  if (["approved", "rejected", "executed"].includes(String(value.status))) {
     assertString(value.decidedAt, "approval.decidedAt");
     assertString(value.decisionRequestId, "approval.decisionRequestId");
     assert.ok(["approved", "rejected"].includes(String(value.decision)), "approval.decision should be known");
@@ -330,6 +331,10 @@ function assertApprovalRecordShape(value: unknown): void {
     assertString(value.executedAt, "approval.executedAt");
     assertString(value.executionRequestId, "approval.executionRequestId");
     assert.equal(value.executionMode, "dry_run");
+  }
+
+  if (value.status === "expired") {
+    assertString(value.expiredAt, "approval.expiredAt");
   }
 }
 
@@ -1175,6 +1180,73 @@ test("approval execution endpoint rejects rejected and missing approval records"
     assertStructuredError(missingExecution, 404, "APPROVAL_NOT_FOUND", "replay-missing-execute-request");
   } finally {
     await closeServer();
+    clearApprovalRecords();
+  }
+});
+
+test("expired approval records cannot be decided or executed", async () => {
+  clearApiAuditEvents();
+  clearApprovalRecords();
+  const port = await listenForTest();
+
+  try {
+    const approval = createApprovalRecord({
+      requestId: "expired-create-request",
+      method: "POST",
+      route: "/agents/skills/execute",
+      skillId: "access_review",
+      selectedSkillIds: ["access_review"],
+      policyReason: "Credential and access-sensitive action requires human approval.",
+      matchedTerms: ["access"],
+      message: "Rotate access credentials for the estate gate.",
+      context: {
+        message: "Rotate access credentials for the estate gate.",
+        authorization: "must-not-be-stored",
+      },
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    const approveResponse = await requestJson(
+      port,
+      "POST",
+      "/agents/approvals/" + approval.id + "/approve",
+      JSON.stringify({ reason: "Trying to approve too late." }),
+      { requestId: "expired-approve-request" },
+    );
+    assertStructuredError(approveResponse, 409, "APPROVAL_EXPIRED", "expired-approve-request");
+    const approveBody = JSON.parse(approveResponse.body) as Record<string, unknown>;
+    assertJsonObject(approveBody.error, "expired approve error");
+    assertJsonObject(approveBody.error.details, "expired approve details");
+    assertJsonObject(approveBody.error.details.approval, "expired approve approval");
+    assertString(approveBody.error.details.approval.id, "expired approval summary id");
+    assertString(approveBody.error.details.approval.expiresAt, "expired approval summary expiresAt");
+    assertString(approveBody.error.details.approval.expiredAt, "expired approval summary expiredAt");
+    assert.equal(approveBody.error.details.approval.status, "expired");
+
+    const executeResponse = await requestJson(port, "POST", "/agents/approvals/" + approval.id + "/execute", undefined, {
+      requestId: "expired-execute-request",
+    });
+    assertStructuredError(executeResponse, 409, "APPROVAL_EXPIRED", "expired-execute-request");
+
+    const listResponse = await requestJson(port, "GET", "/agents/approvals?limit=1", undefined, {
+      requestId: "expired-list-request",
+    });
+    assert.equal(listResponse.statusCode, 200);
+    const listBody = JSON.parse(listResponse.body) as Record<string, unknown>;
+    assert.ok(Array.isArray(listBody.approvals));
+    assert.equal(listBody.approvals.length, 1);
+    assertJsonObject(listBody.approvals[0], "expired listed approval");
+    assertApprovalRecordShape(listBody.approvals[0]);
+    assert.equal(listBody.approvals[0].status, "expired");
+
+    const serialized = `${approveResponse.body} ${executeResponse.body} ${JSON.stringify(listBody)}`;
+    assert.doesNotMatch(serialized, /must-not-be-stored|authorization/i);
+
+    const auditEvents = listApiAuditEvents({ limit: 20 });
+    assert.ok(auditEvents.some((event) => event.eventType === "approval.expire" && event.errorCode === "APPROVAL_EXPIRED"));
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
     clearApprovalRecords();
   }
 });

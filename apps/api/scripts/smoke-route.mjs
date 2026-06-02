@@ -404,6 +404,7 @@ async function assertApprovalDecisionEndpoint() {
     "/agents/approvals: expected ACTION_REQUIRES_APPROVAL",
   );
   assert(approvalParsed.error.details.approval.id, "/agents/approvals: expected approval id");
+  assert(approvalParsed.error.details.approval.expiresAt, "/agents/approvals: expected approval expiresAt");
   const approvalId = approvalParsed.error.details.approval.id;
 
   const decisionResponse = await postJson(`${APPROVALS_PATH}/${approvalId}/approve`, {
@@ -416,6 +417,7 @@ async function assertApprovalDecisionEndpoint() {
 
   const decisionParsed = JSON.parse(decisionResponse.body);
   assert(decisionParsed.approval, "/agents/approvals approve: expected approval");
+  assert(decisionParsed.approval.expiresAt, "/agents/approvals approve: expected expiresAt");
   assert(decisionParsed.approval.status === "approved", "/agents/approvals approve: expected approved status");
   assert(decisionParsed.execution.status === "not_executed", "/agents/approvals approve: expected no execution");
 
@@ -437,6 +439,7 @@ async function assertApprovalDecisionEndpoint() {
   const listParsed = JSON.parse(listResponse.body);
   assert(Array.isArray(listParsed.approvals), "/agents/approvals list: expected approvals array");
   assert(listParsed.approvals.length === 1, "/agents/approvals list: expected one approval");
+  assert(listParsed.approvals[0].expiresAt, "/agents/approvals list: expected expiresAt");
 }
 
 async function assertMetricsEndpoint() {
