@@ -20,6 +20,7 @@ The OpenAPI contract is available at `apps/api/openapi.yaml`.
 - `GET /agents/approvals/:id`
 - `POST /agents/approvals/:id/approve`
 - `POST /agents/approvals/:id/reject`
+- `POST /agents/approvals/:id/execute`
 
 When `SOVEREIGN_ADMIN_API_KEY` is configured, protected visibility routes require:
 

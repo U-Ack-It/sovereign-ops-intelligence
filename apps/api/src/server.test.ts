@@ -300,7 +300,7 @@ function assertApprovalRecordShape(value: unknown): void {
   assertString(value.id, "approval.id");
   assertString(value.requestId, "approval.requestId");
   assertString(value.createdAt, "approval.createdAt");
-  assert.ok(["pending", "approved", "rejected"].includes(String(value.status)), "approval.status should be known");
+  assert.ok(["pending", "approved", "rejected", "executed"].includes(String(value.status)), "approval.status should be known");
   assertString(value.method, "approval.method");
   assert.ok(["/agents/execute", "/agents/skills/execute"].includes(String(value.route)));
   assert.equal(value.policyDecision, "requires_approval");
@@ -324,6 +324,12 @@ function assertApprovalRecordShape(value: unknown): void {
     assert.equal(typeof value.decisionReasonLength, "number");
     assertString(value.decisionReasonDigest, "approval.decisionReasonDigest");
     assert.match(String(value.decisionReasonDigest), /^[a-f0-9]{64}$/);
+  }
+
+  if (value.status === "executed") {
+    assertString(value.executedAt, "approval.executedAt");
+    assertString(value.executionRequestId, "approval.executionRequestId");
+    assert.equal(value.executionMode, "dry_run");
   }
 }
 
@@ -1044,6 +1050,129 @@ test("approval decision endpoint rejects pending records and preserves safe stat
     assertApprovalRecordShape(detailBody.approval);
     assertJsonObject(detailBody.approval, "approval reject detail body");
     assert.equal(detailBody.approval.status, "rejected");
+  } finally {
+    await closeServer();
+    clearApprovalRecords();
+  }
+});
+
+test("approval execution endpoint only replays approved records once in dry-run mode", async () => {
+  clearApiAuditEvents();
+  clearApprovalRecords();
+  const port = await listenForTest();
+
+  try {
+    const approvalResponse = await requestJson(
+      port,
+      "POST",
+      "/agents/execute",
+      JSON.stringify({
+        message: "Review password access for the gate system and reset password alpha-token.",
+        context: {
+          password: "do-not-store",
+          property: "Miami residence",
+        },
+      }),
+      { requestId: "replay-create-request" },
+    );
+
+    assertStructuredError(approvalResponse, 409, "ACTION_REQUIRES_APPROVAL", "replay-create-request");
+    const approvalBody = JSON.parse(approvalResponse.body) as Record<string, unknown>;
+    assertJsonObject(approvalBody.error, "replay approval error");
+    assertJsonObject(approvalBody.error.details, "replay approval details");
+    assertJsonObject(approvalBody.error.details.approval, "replay approval summary");
+    const approvalId = String(approvalBody.error.details.approval.id);
+
+    const pendingExecution = await requestJson(port, "POST", "/agents/approvals/" + approvalId + "/execute", undefined, {
+      requestId: "replay-pending-request",
+    });
+    assertStructuredError(pendingExecution, 409, "APPROVAL_NOT_APPROVED", "replay-pending-request");
+
+    const approveResponse = await requestJson(
+      port,
+      "POST",
+      "/agents/approvals/" + approvalId + "/approve",
+      JSON.stringify({ reason: "Approved for dry-run replay; do not store beta-secret." }),
+      { requestId: "replay-approve-request" },
+    );
+    assert.equal(approveResponse.statusCode, 200);
+
+    const executeResponse = await requestJson(port, "POST", "/agents/approvals/" + approvalId + "/execute", undefined, {
+      requestId: "replay-execute-request",
+    });
+    assert.equal(executeResponse.statusCode, 200);
+    assertJsonResponse(executeResponse);
+    assertRequestIdHeader(executeResponse, "replay-execute-request");
+    const executeBody = JSON.parse(executeResponse.body) as Record<string, unknown>;
+    assertApprovalRecordShape(executeBody.approval);
+    assertJsonObject(executeBody.approval, "replay execution approval");
+    assert.equal(executeBody.approval.status, "executed");
+    assertJsonObject(executeBody.execution, "replay execution result");
+    assert.equal(executeBody.execution.status, "completed");
+    assert.equal(executeBody.execution.mode, "dry_run");
+    assert.equal(executeBody.execution.performedExternalAction, false);
+
+    const duplicateExecution = await requestJson(port, "POST", "/agents/approvals/" + approvalId + "/execute", undefined, {
+      requestId: "replay-duplicate-request",
+    });
+    assertStructuredError(duplicateExecution, 409, "APPROVAL_ALREADY_EXECUTED", "replay-duplicate-request");
+
+    const auditEvents = listApiAuditEvents({ limit: 20 });
+    assert.ok(auditEvents.some((event) => event.eventType === "approval.execute" && event.status === "success"));
+    assert.ok(!auditEvents.some((event) => event.eventType === "advisor.execute"));
+
+    const serialized = executeResponse.body + " " + JSON.stringify(listApprovalRecords({ limit: 1 })[0]);
+    assert.ok(!serialized.includes("alpha-token"));
+    assert.ok(!serialized.includes("do-not-store"));
+    assert.ok(!serialized.includes("beta-secret"));
+  } finally {
+    await closeServer();
+    clearApiAuditEvents();
+    clearApprovalRecords();
+  }
+});
+
+test("approval execution endpoint rejects rejected and missing approval records", async () => {
+  clearApprovalRecords();
+  const port = await listenForTest();
+
+  try {
+    const approvalResponse = await requestJson(
+      port,
+      "POST",
+      "/agents/skills/execute",
+      JSON.stringify({
+        skillId: "contract_risk_scan",
+        context: { message: "Review contract privacy risk before approval." },
+      }),
+      { requestId: "replay-reject-create-request" },
+    );
+
+    assertStructuredError(approvalResponse, 409, "ACTION_REQUIRES_APPROVAL", "replay-reject-create-request");
+    const approvalBody = JSON.parse(approvalResponse.body) as Record<string, unknown>;
+    assertJsonObject(approvalBody.error, "replay reject approval error");
+    assertJsonObject(approvalBody.error.details, "replay reject approval details");
+    assertJsonObject(approvalBody.error.details.approval, "replay reject approval summary");
+    const approvalId = String(approvalBody.error.details.approval.id);
+
+    const rejectResponse = await requestJson(
+      port,
+      "POST",
+      "/agents/approvals/" + approvalId + "/reject",
+      JSON.stringify({ reason: "Rejected for missing owner confirmation." }),
+      { requestId: "replay-reject-request" },
+    );
+    assert.equal(rejectResponse.statusCode, 200);
+
+    const rejectedExecution = await requestJson(port, "POST", "/agents/approvals/" + approvalId + "/execute", undefined, {
+      requestId: "replay-rejected-execute-request",
+    });
+    assertStructuredError(rejectedExecution, 409, "APPROVAL_NOT_APPROVED", "replay-rejected-execute-request");
+
+    const missingExecution = await requestJson(port, "POST", "/agents/approvals/missing/execute", undefined, {
+      requestId: "replay-missing-execute-request",
+    });
+    assertStructuredError(missingExecution, 404, "APPROVAL_NOT_FOUND", "replay-missing-execute-request");
   } finally {
     await closeServer();
     clearApprovalRecords();

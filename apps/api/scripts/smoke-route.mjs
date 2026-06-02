@@ -419,6 +419,16 @@ async function assertApprovalDecisionEndpoint() {
   assert(decisionParsed.approval.status === "approved", "/agents/approvals approve: expected approved status");
   assert(decisionParsed.execution.status === "not_executed", "/agents/approvals approve: expected no execution");
 
+  const executeResponse = await postJson(`${APPROVALS_PATH}/${approvalId}/execute`, {});
+  assert(
+    executeResponse.statusCode === 200,
+    `/agents/approvals execute: expected HTTP 200, got ${executeResponse.statusCode}`,
+  );
+  const executeParsed = JSON.parse(executeResponse.body);
+  assert(executeParsed.approval.status === "executed", "/agents/approvals execute: expected executed status");
+  assert(executeParsed.execution.mode === "dry_run", "/agents/approvals execute: expected dry_run mode");
+  assert(executeParsed.execution.performedExternalAction === false, "/agents/approvals execute: expected no external action");
+
   const listResponse = await getJson(`${APPROVALS_PATH}?limit=1`);
   assert(
     listResponse.statusCode === 200,

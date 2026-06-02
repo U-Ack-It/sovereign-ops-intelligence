@@ -17,6 +17,7 @@ Local-first TypeScript API for advisor routing, dry-run skill execution, audit v
 - `GET /agents/approvals/:id` - inspect one approval record.
 - `POST /agents/approvals/:id/approve` - record approval without automatically executing the deferred action.
 - `POST /agents/approvals/:id/reject` - record rejection without executing the deferred action.
+- `POST /agents/approvals/:id/execute` - replay an approved record once in dry-run mode without external side effects.
 
 ## Local Commands
 
@@ -253,5 +254,5 @@ npm run mcp:manifest:update-snapshot
 - Advisor execution is dry-run and does not call external systems.
 - `/agents/audit` and `/agents/dashboard` are read-only visibility endpoints.
 - `/agents/metrics` is a read-only admin visibility endpoint. It does not expose secrets, request bodies, or environment variable values beyond the environment name.
-- `/agents/approvals` endpoints are admin-protected. Approval and rejection record decisions only; deferred action execution is not enabled in this baseline. Approval records store safe metadata, digests, and lengths rather than raw inputs or secrets.
+- `/agents/approvals` endpoints are admin-protected. Approval and rejection record decisions only. Approved records can be replayed once in dry-run mode; no external side effects are performed. Approval records store safe metadata, digests, and lengths rather than raw inputs or secrets.
 - Audit, dashboard, and metrics data are currently in-memory only and reset when the process restarts.

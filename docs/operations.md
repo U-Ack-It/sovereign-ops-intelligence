@@ -82,4 +82,4 @@ Do not commit real secrets, endpoint credentials, or OTLP headers.
 
 ## Human Approval Workflow
 
-Approval-required agent actions return `ACTION_REQUIRES_APPROVAL` and create an in-memory pending approval record. Operators can inspect records with `GET /agents/approvals` or `GET /agents/approvals/:id`, then record a decision with `POST /agents/approvals/:id/approve` or `POST /agents/approvals/:id/reject`. These endpoints are admin-protected. Approval decisions do not automatically execute deferred actions in this baseline.
+Approval-required agent actions return `ACTION_REQUIRES_APPROVAL` and create an in-memory pending approval record. Operators can inspect records with `GET /agents/approvals` or `GET /agents/approvals/:id`, then record a decision with `POST /agents/approvals/:id/approve` or `POST /agents/approvals/:id/reject`. These endpoints are admin-protected. Approval decisions do not automatically execute deferred actions. `POST /agents/approvals/:id/execute` replays approved records exactly once in dry-run mode and performs no external side effects.

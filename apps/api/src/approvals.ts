@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export type ApprovalStatus = "pending" | "approved" | "rejected";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed";
 export type ApprovalDecision = "approved" | "rejected";
 
 export type ApprovalRecord = {
@@ -26,6 +26,9 @@ export type ApprovalRecord = {
   decision?: ApprovalDecision;
   decisionReasonLength?: number;
   decisionReasonDigest?: string;
+  executedAt?: string;
+  executionRequestId?: string;
+  executionMode?: "dry_run";
 };
 
 type CreateApprovalRecordInput = {
@@ -51,6 +54,17 @@ type DecideApprovalRecordInput = {
 type ApprovalDecisionResult =
   | { ok: true; approval: ApprovalRecord }
   | { ok: false; code: "APPROVAL_NOT_FOUND" | "APPROVAL_ALREADY_DECIDED"; approval?: ApprovalRecord };
+
+type ApprovalExecutionResult =
+  | { ok: true; approval: ApprovalRecord }
+  | {
+      ok: false;
+      code:
+        | "APPROVAL_NOT_FOUND"
+        | "APPROVAL_NOT_APPROVED"
+        | "APPROVAL_ALREADY_EXECUTED";
+      approval?: ApprovalRecord;
+    };
 
 type ListApprovalRecordsOptions = {
   limit?: number;
@@ -164,6 +178,29 @@ export function decideApprovalRecord(id: string, input: DecideApprovalRecordInpu
   record.decisionRequestId = input.requestId;
   record.decisionReasonLength = reason.length;
   record.decisionReasonDigest = digestText(reason);
+
+  return { ok: true, approval: cloneApprovalRecord(record) };
+}
+
+export function markApprovalRecordExecuted(id: string, requestId: string): ApprovalExecutionResult {
+  const record = approvalById(id);
+
+  if (!record) {
+    return { ok: false, code: "APPROVAL_NOT_FOUND" };
+  }
+
+  if (record.status === "executed") {
+    return { ok: false, code: "APPROVAL_ALREADY_EXECUTED", approval: cloneApprovalRecord(record) };
+  }
+
+  if (record.status !== "approved") {
+    return { ok: false, code: "APPROVAL_NOT_APPROVED", approval: cloneApprovalRecord(record) };
+  }
+
+  record.status = "executed";
+  record.executedAt = new Date().toISOString();
+  record.executionRequestId = requestId;
+  record.executionMode = "dry_run";
 
   return { ok: true, approval: cloneApprovalRecord(record) };
 }

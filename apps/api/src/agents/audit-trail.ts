@@ -3,6 +3,7 @@ export type ApiAuditEventType =
   | "advisor.execute"
   | "skill.execute"
   | "approval.decision"
+  | "approval.execute"
   | "api.error";
 
 export type ApiAuditStatus = "success" | "error";

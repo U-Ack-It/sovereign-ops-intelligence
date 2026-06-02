@@ -70,7 +70,7 @@ components:
           format: date-time
         status:
           type: string
-          enum: [pending, approved, rejected]
+          enum: [pending, approved, rejected, executed]
         method:
           type: string
         route:
@@ -123,6 +123,14 @@ components:
         decisionReasonDigest:
           type: string
           description: SHA-256 digest of the decision reason. The raw reason is not stored.
+        executedAt:
+          type: string
+          format: date-time
+        executionRequestId:
+          type: string
+        executionMode:
+          type: string
+          enum: [dry_run]
     ApprovalListResponse:
       type: object
       required:
@@ -171,6 +179,42 @@ components:
               enum: [not_executed]
             reason:
               type: string
+    ApprovalExecutionResponse:
+      type: object
+      required:
+        - requestId
+        - approval
+        - execution
+      properties:
+        requestId:
+          type: string
+        approval:
+          $ref: "#/components/schemas/ApprovalRecord"
+        execution:
+          type: object
+          required:
+            - status
+            - mode
+            - approvalId
+            - summary
+            - performedExternalAction
+          properties:
+            status:
+              type: string
+              enum: [completed]
+            mode:
+              type: string
+              enum: [dry_run]
+            approvalId:
+              type: string
+            skillId:
+              type:
+                - string
+                - "null"
+            summary:
+              type: string
+            performedExternalAction:
+              type: boolean
     SkillDefinition:
       type: object
       required:
@@ -883,6 +927,32 @@ paths:
                 $ref: "#/components/schemas/ApprovalDecisionResponse"
         "409":
           description: Approval was already decided.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agents/approvals/{approvalId}/execute:
+    post:
+      tags: [Admin Visibility]
+      summary: Dry-run replay an approved approval record
+      description: Executes only the safe replay baseline. No external side effects are performed.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: approvalId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Approved action replay recorded in dry-run mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalExecutionResponse"
+        "409":
+          description: Approval is not approved or was already executed.
           content:
             application/json:
               schema:

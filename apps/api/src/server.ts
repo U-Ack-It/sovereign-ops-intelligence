@@ -4,7 +4,7 @@ import { AddressInfo } from "node:net";
 import { pathToFileURL } from "node:url";
 
 import { evaluateActionPolicy, type ActionPolicyResult } from "./action-policy.js";
-import { createApprovalRecord, decideApprovalRecord, getApprovalRecord, listApprovalRecords } from "./approvals.js";
+import { createApprovalRecord, decideApprovalRecord, getApprovalRecord, listApprovalRecords, markApprovalRecordExecuted } from "./approvals.js";
 import { verifyAdminRequest } from "./admin-auth.js";
 import { ApiAuditEventType, ApiAuditStatus, listApiAuditEvents, recordApiAuditEvent } from "./agents/audit-trail.js";
 import { buildAdvisorDashboardSummary } from "./agents/dashboard.js";
@@ -506,6 +506,10 @@ function approvalDecisionFromPath(path: string): "approved" | "rejected" | null 
   return null;
 }
 
+function isApprovalExecutionPath(path: string): boolean {
+  return path.endsWith("/execute");
+}
+
 function approvalResponseDetails(approval: ReturnType<typeof createApprovalRecord>): Record<string, unknown> {
   return {
     id: approval.id,
@@ -518,6 +522,9 @@ function approvalResponseDetails(approval: ReturnType<typeof createApprovalRecor
     skillId: approval.skillId,
     selectedSkillIds: approval.selectedSkillIds,
     decision: approval.decision,
+    executedAt: approval.executedAt,
+    executionRequestId: approval.executionRequestId,
+    executionMode: approval.executionMode,
   };
 }
 
@@ -715,6 +722,70 @@ async function handleAgentsExecute(
   });
 
   sendJson(response, 200, { requestId, route, execution, actionPolicy: policy }, requestId);
+}
+
+async function handleApprovalExecution(
+  request: IncomingMessage,
+  response: ServerResponse,
+  requestId: string,
+  approvalId: string,
+): Promise<void> {
+  const auditContext = {
+    method: request.method ?? "UNKNOWN",
+    route: "/agents/approvals",
+  };
+
+  const result = markApprovalRecordExecuted(approvalId, requestId);
+
+  if (!result.ok) {
+    const statusCode = result.code === "APPROVAL_NOT_FOUND" ? 404 : 409;
+    sendError(
+      response,
+      statusCode,
+      {
+        code: result.code,
+        message:
+          result.code === "APPROVAL_NOT_FOUND"
+            ? "Approval record was not found."
+            : result.code === "APPROVAL_ALREADY_EXECUTED"
+              ? "Approval record has already been executed."
+              : "Approval record must be approved before execution.",
+        details: result.approval ? { approval: approvalResponseDetails(result.approval) } : {},
+      },
+      requestId,
+      auditContext,
+    );
+    return;
+  }
+
+  safeRecordApiAuditEvent({
+    requestId,
+    method: auditContext.method,
+    route: auditContext.route,
+    eventType: "approval.execute",
+    status: "success",
+    advisor: result.approval.advisor,
+    selectedSkillIds: result.approval.selectedSkillIds,
+    errorCode: "APPROVAL_EXECUTED_DRY_RUN",
+  });
+
+  sendJson(
+    response,
+    200,
+    {
+      requestId,
+      approval: result.approval,
+      execution: {
+        status: "completed",
+        mode: "dry_run",
+        approvalId: result.approval.id,
+        skillId: result.approval.skillId ?? result.approval.selectedSkillIds[0] ?? null,
+        summary: "Approved action replay recorded in dry-run mode. No external side effects were performed.",
+        performedExternalAction: false,
+      },
+    },
+    requestId,
+  );
 }
 
 async function handleApprovalDecision(
@@ -986,7 +1057,7 @@ export const server = createServer(async (request, response) => {
       const decision = approvalDecisionFromPath(requestPath);
       const approvalId = approvalIdFromPath(requestPath);
 
-      if (decision && approvalId) {
+      if ((decision || isApprovalExecutionPath(requestPath)) && approvalId) {
         const adminAuth = verifyAdminRequest(request);
 
         if (!adminAuth.ok) {
@@ -998,7 +1069,11 @@ export const server = createServer(async (request, response) => {
           return;
         }
 
-        await handleApprovalDecision(request, response, requestId, approvalId, decision);
+        if (decision) {
+          await handleApprovalDecision(request, response, requestId, approvalId, decision);
+        } else {
+          await handleApprovalExecution(request, response, requestId, approvalId);
+        }
         logRequest(requestId, request.method, request.url, response.statusCode, requestStartedAt);
         return;
       }
