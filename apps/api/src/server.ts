@@ -21,6 +21,7 @@ import { orchestrateAgentRequest } from "./agents/orchestrator.js";
 import { SkillExecutionContext, executeSkill } from "./agents/skill-executor.js";
 import { getApiMetricsSnapshot, recordHttpRequestMetric, recordTelemetryEvent } from "./observability.js";
 import { buildOperationalSnapshot } from "./operational-snapshot.js";
+import { evaluateRateLimit, rateLimitBucketForRequest } from "./rate-limit.js";
 import { initializeOtelExportIfEnabled, shutdownOtelExport } from "./otel-exporter.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -126,6 +127,10 @@ function logRequest(
   }
 
   console.log(`[${requestId}] ${method ?? "UNKNOWN"} ${url ?? "/"} ${statusCode}`);
+}
+
+function rateLimitClientId(request: IncomingMessage): string {
+  return request.socket.remoteAddress ?? "unknown";
 }
 
 function requestPathFromUrl(url: string | undefined): string {
@@ -1043,6 +1048,44 @@ export const server = createServer(async (request, response) => {
   const requestPath = requestPathFromUrl(request.url);
 
   try {
+    const rateLimitBucket = rateLimitBucketForRequest(request.method, requestPath);
+
+    if (rateLimitBucket) {
+      const rateLimit = evaluateRateLimit({
+        bucket: rateLimitBucket,
+        clientId: rateLimitClientId(request),
+      });
+
+      if (!rateLimit.allowed) {
+        sendError(
+          response,
+          429,
+          {
+            code: "RATE_LIMIT_EXCEEDED",
+            message: "Too many requests. Please retry after the rate limit resets.",
+            details: {
+              bucket: rateLimit.bucket,
+              limit: rateLimit.limit,
+              resetAt: new Date(rateLimit.resetAt).toISOString(),
+            },
+          },
+          requestId,
+          {
+            method: request.method ?? "UNKNOWN",
+            route: requestPath,
+          },
+          {
+            "retry-after": String(rateLimit.retryAfterSeconds),
+            "x-ratelimit-limit": String(rateLimit.limit),
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": String(Math.ceil(rateLimit.resetAt / 1000)),
+          },
+        );
+        logRequest(requestId, request.method, request.url, 429, requestStartedAt);
+        return;
+      }
+    }
+
     if (request.method === "GET" && requestPath === "/health") {
       sendJson(
         response,

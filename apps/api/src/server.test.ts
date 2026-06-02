@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { clearApiAuditEvents, listApiAuditEvents } from "./agents/audit-trail.js";
 import { clearApprovalRecords, createApprovalRecord, listApprovalRecords } from "./approvals.js";
 import { recordTelemetryEvent, registerTelemetrySink, resetApiMetrics } from "./observability.js";
+import { resetRateLimitState } from "./rate-limit.js";
 import { parseRouteRequestBody, server } from "./server.js";
 
 type TestResponse = {
@@ -1514,6 +1515,51 @@ test("missing request id generates a non-empty request id on responses", async (
     assert.equal(body.error.requestId, invalidJson.headers["x-request-id"]);
   } finally {
     await closeServer();
+  }
+});
+
+test("rate limited agent requests return structured 429 errors", async () => {
+  const originalLimit = process.env.SOVEREIGN_RATE_LIMIT_AGENT_ACTIONS;
+  const originalWindow = process.env.SOVEREIGN_RATE_LIMIT_WINDOW_MS;
+
+  process.env.SOVEREIGN_RATE_LIMIT_AGENT_ACTIONS = "1";
+  process.env.SOVEREIGN_RATE_LIMIT_WINDOW_MS = "60000";
+  resetRateLimitState();
+  const port = await listenForTest();
+
+  try {
+    const first = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "Schedule maintenance for the property inspection." }),
+      { requestId: "rate-limit-first" },
+    );
+    const second = await requestJson(
+      port,
+      "POST",
+      "/agents/route",
+      JSON.stringify({ message: "Schedule maintenance for the property inspection." }),
+      { requestId: "rate-limit-second" },
+    );
+
+    assert.equal(first.statusCode, 200);
+    assertStructuredError(second, 429, "RATE_LIMIT_EXCEEDED", "rate-limit-second");
+    assert.equal(second.headers["retry-after"], "60");
+    assert.equal(second.headers["x-ratelimit-limit"], "1");
+    assert.equal(second.headers["x-ratelimit-remaining"], "0");
+    assertString(second.headers["x-ratelimit-reset"], "x-ratelimit-reset");
+
+    const body = JSON.parse(second.body) as Record<string, unknown>;
+    assertJsonObject(body.error, "rate limit error");
+    assertJsonObject(body.error.details, "rate limit details");
+    assert.equal(body.error.details.bucket, "agent_action");
+    assert.equal(body.error.details.limit, 1);
+  } finally {
+    await closeServer();
+    restoreEnv("SOVEREIGN_RATE_LIMIT_AGENT_ACTIONS", originalLimit);
+    restoreEnv("SOVEREIGN_RATE_LIMIT_WINDOW_MS", originalWindow);
+    resetRateLimitState();
   }
 });
 

@@ -76,6 +76,14 @@ Run with production environment values supplied at runtime. Do not bake secrets 
 - `NODE_ENV=production`
 - `SOVEREIGN_ADMIN_API_KEY`
 
+## Runtime Rate Limit Environment
+
+- `SOVEREIGN_RATE_LIMIT_AGENT_ACTIONS`
+- `SOVEREIGN_RATE_LIMIT_ADMIN_VISIBILITY`
+- `SOVEREIGN_RATE_LIMIT_WINDOW_MS`
+
+These are optional in-memory guardrails for agent action POST routes and admin visibility/approval routes. Do not use them as a replacement for upstream edge protection in production.
+
 ## Optional OTLP Environment
 
 - `SOVEREIGN_OTEL_ENABLED`

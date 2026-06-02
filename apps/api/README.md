@@ -58,6 +58,9 @@ npm start
 - `OTEL_SERVICE_NAME` - service name for external telemetry. Defaults to `sovereign-ops-api`.
 - `OTEL_EXPORTER_OTLP_ENDPOINT` - OTLP HTTP trace endpoint.
 - `OTEL_EXPORTER_OTLP_HEADERS` - OTLP HTTP headers, usually for backend authentication.
+- `SOVEREIGN_RATE_LIMIT_AGENT_ACTIONS` - optional per-minute limit for agent route and execution POST requests. Defaults to `120`.
+- `SOVEREIGN_RATE_LIMIT_ADMIN_VISIBILITY` - optional per-minute limit for admin visibility and approval endpoints. Defaults to `240`.
+- `SOVEREIGN_RATE_LIMIT_WINDOW_MS` - optional rate-limit window in milliseconds. Defaults to `60000`.
 
 When `SOVEREIGN_ADMIN_API_KEY` is configured, requests to `GET /agents/audit`, `GET /agents/dashboard`, `GET /agents/metrics`, `GET /agents/snapshot`, and `GET/POST /agents/approvals...` must include:
 
@@ -72,6 +75,10 @@ In production, `SOVEREIGN_ADMIN_API_KEY` must be configured and must not be an o
 `npm run ci:check` verifies that `.github/workflows/api-stability.yml` runs `verify:release` with the required CI admin key environment and that the release script still includes docs, OpenAPI, MCP, normal API, and production checks.
 
 `npm run openapi:check` verifies that server routes are represented in `apps/api/openapi.yaml` and that admin-only paths declare `ApiKeyAuth`.
+
+## Runtime Rate Limiting
+
+The API applies an in-memory rate-limit baseline to agent action POST routes and admin visibility/approval routes. Health, readiness, and version probes are not rate-limited. Limit breaches return structured `429 RATE_LIMIT_EXCEEDED` errors with `Retry-After` and `X-RateLimit-*` headers. The limiter stores only a route bucket and socket client identifier, never request bodies, auth headers, secrets, tokens, or raw input.
 
 ## Response Security
 
