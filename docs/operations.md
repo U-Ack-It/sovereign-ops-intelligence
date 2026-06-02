@@ -49,12 +49,14 @@ Use `mcp:manifest:update-snapshot` only after the changed MCP contract has been 
 
 ```sh
 npm --prefix apps/api run check:production
+npm --prefix apps/api run openapi:check
 npm --prefix apps/api run verify:production
 npm --prefix apps/api run verify:release
 npm --prefix apps/api start
 ```
 
 `check:production` requires a safe `SOVEREIGN_ADMIN_API_KEY` when `NODE_ENV=production`.
+`openapi:check` verifies that documented paths stay aligned with server routes and admin route security.
 `verify:release` runs docs, MCP, API, and production checks; provide a safe `SOVEREIGN_ADMIN_API_KEY` in the environment before running it.
 
 ## Docker

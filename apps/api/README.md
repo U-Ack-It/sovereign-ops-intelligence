@@ -69,6 +69,8 @@ In production, `SOVEREIGN_ADMIN_API_KEY` must be configured and must not be an o
 
 `npm run verify:release` runs the documentation metadata check, MCP checks, API verification, and production verification. It requires `SOVEREIGN_ADMIN_API_KEY` to be present because it includes the production configuration gate.
 
+`npm run openapi:check` verifies that server routes are represented in `apps/api/openapi.yaml` and that admin-only paths declare `ApiKeyAuth`.
+
 ## Response Security
 
 All JSON API responses include baseline hardening headers: `Cache-Control: no-store`, `Content-Security-Policy`, `Cross-Origin-Resource-Policy`, `Referrer-Policy`, `X-Content-Type-Options`, and `X-Frame-Options`. These headers are applied centrally to success and error responses and are covered by contract tests.
